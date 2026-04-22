@@ -19,12 +19,14 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "i2c.h"
+#include "stm32f4xx_hal.h"
 #include "tim.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "oled.h"
+#include "font.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -92,13 +94,19 @@ int main(void)
   MX_TIM3_Init();
   MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
-
+  HAL_Delay(20);
+  OLED_Init();
+  OLED_NewFrame();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    // OLED_PrintString(1, 1, "动物", &font16x16, OLED_COLOR_NORMAL);
+    // OLED_ShowFrame();
+
+    
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
