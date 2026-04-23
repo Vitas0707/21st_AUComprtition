@@ -19,14 +19,17 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "i2c.h"
-#include "stm32f4xx_hal.h"
 #include "tim.h"
+#include "usart.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "oled.h"
 #include "font.h"
+#include "Motor.h"
+#include "Camera.h"
+#include "Bluetooth.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -47,7 +50,7 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+uint8_t cam_rx_byte
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -93,16 +96,31 @@ int main(void)
   MX_I2C2_Init();
   MX_TIM3_Init();
   MX_TIM4_Init();
+  MX_USART1_UART_Init();
+
+
   /* USER CODE BEGIN 2 */
+  //电机初始化
+  MOTOR_Init(M1TIM, M1CHANNEL);
+  MOTOR_Init(M2TIM, M2CHANNEL);
+  MOTOR_Init(M3TIM, M3CHANNEL);
+  MOTOR_Init(M4TIM, M4CHANNEL);
+  //OLED初始化
   HAL_Delay(20);
   OLED_Init();
   OLED_NewFrame();
+  //摄像头初始化
+  CAMERA_Init();
+  //蓝牙初始化
+  BLUETOOTH_Init();
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    //OLED测试
     // OLED_PrintString(1, 1, "动物", &font16x16, OLED_COLOR_NORMAL);
     // OLED_ShowFrame();
 
@@ -111,6 +129,51 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
   }
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+  if (huart == BLUETOOTH_UART_HANDLE) 
+  {
+    extern uint8_t Bluetooth_Rx_Buffer[BLUETOOTH_RX_BUFFER_SIZE]; // 蓝牙接收缓冲区
+    
+    //将接收到的指令立刻传给摄像头
+    HAL_UART_Transmit_IT(CAMERA_UART_HANDLE, Bluetooth_Rx_Buffer, sizeof(Bluetooth_Rx_Buffer));
+    // 重新开启中断接收下一个字节
+    HAL_UART_Receive_IT(BLUETOOTH_UART_HANDLE, Bluetooth_Rx_Buffer, sizeof(Bluetooth_Rx_Buffer));
+  }
+  
+  uint8_t temp_data;
+    
+  else if (huart == CAMERA_UART_HANDLE) {      
+
+    extern uint8_t cam_rx_byte; 
+    
+    //解析数据
+    CAMERA_UART_Receive_Process(cam_rx_byte);
+    
+    // 重新开启中断接收下一个字节
+    HAL_UART_Receive_IT(CAMERA_UART_HANDLE, &cam_rx_byte, 1);
+  }
+}
+
+
+void CAMERA_Data_Received_Callback(CameraData_t *data)
+{
+  if (data->type == 'D') {
+      // 处理方向+数字，例如 (F, 3)
+      printf("收到指令: 方向=%d, 格数=%d\r\n", data->direction, data->value);
+      // 在这里调用你的电机控制函数，例如 Motor_Move(data->value);
+  } 
+  else if (data->type == 'S') {
+      // 处理字符串，例如 "动物"
+      OLED_Clear();
+      OLED_PrintString(1, 1, data->str_buf, &font16x16, OLED_COLOR_NORMAL);
+  } 
+  else if (data->type == 'N') {
+      // 处理纯数字
+      printf("收到数字: %d\r\n", data->value);
+  }
+}
   /* USER CODE END 3 */
 }
 
