@@ -6,43 +6,39 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "usart.h"
 
 // 定义使用的串口句柄
-#define CAMERA_UART_HANDLE huart1
+#define CAMERA_UART_HANDLE (&huart1)
 //定义步数存储长度
 #define MAX_STEPS 100
-//导出记录步数的变量
-extern uint8_t Step_Index;                      // 当前记录到了第几步
-extern uint8_t Is_Recording;                    // 是否在记录模式
-extern uint8_t Is_Replaying;                    // 是否在回放模式
-extern uint8_t Replay_Index;                    // 回放指针
+//定义状态
 
-// --- 1. 指令定义 ---
-typedef enum {
-    CMD_MOVE = 'M',       // 移动/开始
-    CMD_RECOGNIZE = 'R',  // 识别
-    CMD_GET_NUM = 'G',    // 获取数字
-} CameraCmd_t;
 
-// --- 2. 接收数据类型定义 ---
-typedef enum {
-    DATA_TYPE_DIR_NUM = 'D', // 方向+数字 (如: 前进3格)
-    DATA_TYPE_STRING = 'S',  // 字符数据 (如: "动物")
-    DATA_TYPE_NUMBER = 'N'   // 纯数字 (如: 123)
-} CameraDataType_t;
-
-// --- 3. 解析后的数据结构 ---
+// --- 解析后的数据结构 ---
 typedef struct {
-    uint8_t type;      // 数据类型 ('D', 'S', 'N')
-    int8_t direction;  // 方向 (仅类型D有效: 1=前, 2=后, 3=左, 4=右, -1=无效)
-    uint8_t steps;     //行动步数 (仅类型D有效)
-    int value;         // 数值 (类型D和N有效)
-    char str_buf[32];  // 字符串缓冲区 (仅类型S有效)
+    // uint8_t type;          // 数据类型 ('R'：字符串，传入索引即可, 'G'：数字)
+    uint8_t value;         // 数值（类型 'G' 有效）
+    uint8_t str_index;     // 字符串索引（类型 'R' 有效）
 } CameraData_t;
 
-// --- 4. 函数声明 ---
+typedef struct {
+    // uint8_t type;            // 数据类型 ('M')
+    uint8_t direction;       // 移动方向
+    uint8_t steps;           // 移动距离
+} step_t;
+
+// 存储 M 类型的步骤数组（在 Camera.c 中定义）
+extern step_t Steps[MAX_STEPS];
+// 最近解析出的 R/G 数据（在 Camera.c 中定义）
+extern CameraData_t Camera_Data;
+
+
+// 用于串口单字节接收的缓冲（在 Camera.c 中定义）
+extern uint8_t cam_rx_byte;
+
+// --- 函数声明 ---
 void CAMERA_Init(void);
-void CAMERA_Send_Cmd(CameraCmd_t cmd);
 
 // 用户需要实现的回调函数 (在 main.c 或其他地方实现)
 void CAMERA_Data_Received_Callback(CameraData_t *data);

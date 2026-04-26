@@ -65,8 +65,6 @@ void Error_Handler(void);
 #define M1_IN1_GPIO_Port GPIOB
 #define M1_IN2_Pin GPIO_PIN_1
 #define M1_IN2_GPIO_Port GPIOB
-#define M4_IN1_Pin GPIO_PIN_10
-#define M4_IN1_GPIO_Port GPIOD
 #define M4_IN2_Pin GPIO_PIN_11
 #define M4_IN2_GPIO_Port GPIOD
 #define M3_IN1_Pin GPIO_PIN_14

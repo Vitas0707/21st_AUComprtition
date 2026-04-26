@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "i2c.h"
+#include "stm32f4xx_hal.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
@@ -50,7 +51,7 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-uint8_t cam_rx_byte
+/* cam_rx_byte is defined in Camera.c */
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -61,6 +62,27 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+  if (huart == BLUETOOTH_UART_HANDLE) {
+    extern uint8_t Bluetooth_Rx_Buffer[BLUETOOTH_RX_BUFFER_SIZE]; // 蓝牙接收缓冲区
+    if (Bluetooth_Rx_Buffer[0] == 'M' || Bluetooth_Rx_Buffer[0] == 'R' || Bluetooth_Rx_Buffer[0] == 'G') {
+        HAL_UART_Transmit_IT(CAMERA_UART_HANDLE, Bluetooth_Rx_Buffer, sizeof(Bluetooth_Rx_Buffer));
+    } else if (Bluetooth_Rx_Buffer[0] == 'B') {
+      //控制小车回去的逻辑
+    }
+    HAL_UART_Receive_IT(BLUETOOTH_UART_HANDLE, Bluetooth_Rx_Buffer, sizeof(Bluetooth_Rx_Buffer));
+  }
+  else if (huart == CAMERA_UART_HANDLE) {
+    // 逐字节交给摄像头解析模块处理
+    CAMERA_UART_Receive_Process(cam_rx_byte);
+    //开启下一次接收
+    HAL_UART_Receive_IT(CAMERA_UART_HANDLE, &cam_rx_byte, 1);
+  }
+}
+
+
 
 /* USER CODE END 0 */
 
@@ -97,18 +119,15 @@ int main(void)
   MX_TIM3_Init();
   MX_TIM4_Init();
   MX_USART1_UART_Init();
-
-
+  MX_USART2_UART_Init();
+  MX_TIM1_Init();
+  MX_TIM2_Init();
+  MX_TIM5_Init();
+  MX_TIM8_Init();
   /* USER CODE BEGIN 2 */
-  //电机初始化
-  MOTOR_Init(M1TIM, M1CHANNEL);
-  MOTOR_Init(M2TIM, M2CHANNEL);
-  MOTOR_Init(M3TIM, M3CHANNEL);
-  MOTOR_Init(M4TIM, M4CHANNEL);
   //OLED初始化
   HAL_Delay(20);
   OLED_Init();
-  OLED_NewFrame();
   //摄像头初始化
   CAMERA_Init();
   //蓝牙初始化
@@ -124,56 +143,33 @@ int main(void)
     // OLED_PrintString(1, 1, "动物", &font16x16, OLED_COLOR_NORMAL);
     // OLED_ShowFrame();
 
+    if(Show_permission == 1){
+      
+      OLED_NewFrame();
+      
+      if (Camera_Data.str_index == 0) {
+        OLED_PrintString(1, 1, "动物", &font16x16, OLED_COLOR_NORMAL);
+        }else if (Camera_Data.str_index == 1) {
+        OLED_PrintString(1, 1, "人类", &font16x16, OLED_COLOR_NORMAL);
+        }else if (Camera_Data.str_index == 2) {
+        OLED_PrintString(1, 1, "水果", &font16x16, OLED_COLOR_NORMAL);
+        }else if (Camera_Data.str_index == 3) {
+        OLED_PrintString(1, 1, "枪械", &font16x16, OLED_COLOR_NORMAL);
+        }else {
+        OLED_PrintString(1, 1, "数据有误", &font16x16, OLED_COLOR_NORMAL);
+        }
+
+      OLED_ShowFrame();//一直显示在屏幕上，直到下一次更新
+      Show_permission = 2;//显示完成
+    }
     
+
+    HAL_Delay(10);//适当延时，避免过度占用CPU资源
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
   }
 
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-  if (huart == BLUETOOTH_UART_HANDLE) 
-  {
-    extern uint8_t Bluetooth_Rx_Buffer[BLUETOOTH_RX_BUFFER_SIZE]; // 蓝牙接收缓冲区
-    
-    //将接收到的指令立刻传给摄像头
-    HAL_UART_Transmit_IT(CAMERA_UART_HANDLE, Bluetooth_Rx_Buffer, sizeof(Bluetooth_Rx_Buffer));
-    // 重新开启中断接收下一个字节
-    HAL_UART_Receive_IT(BLUETOOTH_UART_HANDLE, Bluetooth_Rx_Buffer, sizeof(Bluetooth_Rx_Buffer));
-  }
-  
-  uint8_t temp_data;
-    
-  else if (huart == CAMERA_UART_HANDLE) {      
-
-    extern uint8_t cam_rx_byte; 
-    
-    //解析数据
-    CAMERA_UART_Receive_Process(cam_rx_byte);
-    
-    // 重新开启中断接收下一个字节
-    HAL_UART_Receive_IT(CAMERA_UART_HANDLE, &cam_rx_byte, 1);
-  }
-}
-
-
-void CAMERA_Data_Received_Callback(CameraData_t *data)
-{
-  if (data->type == 'D') {
-      // 处理方向+数字，例如 (F, 3)
-      printf("收到指令: 方向=%d, 格数=%d\r\n", data->direction, data->value);
-      // 在这里调用你的电机控制函数，例如 Motor_Move(data->value);
-  } 
-  else if (data->type == 'S') {
-      // 处理字符串，例如 "动物"
-      OLED_Clear();
-      OLED_PrintString(1, 1, data->str_buf, &font16x16, OLED_COLOR_NORMAL);
-  } 
-  else if (data->type == 'N') {
-      // 处理纯数字
-      printf("收到数字: %d\r\n", data->value);
-  }
-}
   /* USER CODE END 3 */
 }
 

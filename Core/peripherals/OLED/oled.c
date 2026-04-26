@@ -168,6 +168,14 @@ void OLED_NewFrame()
 }
 
 /**
+ * @brief 清空显存（兼容调用）
+ */
+void OLED_Clear()
+{
+  OLED_NewFrame();
+}
+
+/**
  * @brief 将当前显存显示到屏幕上
  * @note 此函数是移植本驱动时的重要函数 将本驱动库移植到其他驱动芯片时应根据实际情况修改此函数
  */
