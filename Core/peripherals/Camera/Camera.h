@@ -36,6 +36,8 @@ extern CameraData_t Camera_Data;
 
 // 用于串口单字节接收的缓冲（在 Camera.c 中定义）
 extern uint8_t cam_rx_byte;
+// 显示许可标志（在 Camera.c 中定义）
+extern uint8_t Show_permission;
 
 // --- 函数声明 ---
 void CAMERA_Init(void);

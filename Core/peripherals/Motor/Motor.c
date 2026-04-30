@@ -4,11 +4,16 @@
 #include "stm32f4xx_hal_gpio.h"
 #include "stm32f4xx_hal_tim.h"
 #include "tim.h"
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846f
 #endif
+/* 运行时可配置的起动助力参数（默认为头文件中的宏） */
+static uint16_t g_start_threshold_percent = MOTOR_START_THRESHOLD_PERCENT;
+static uint16_t g_start_boost_percent = MOTOR_START_BOOST_PERCENT;
+static uint32_t g_start_boost_ms = MOTOR_START_BOOST_MS;
 /**
  * @file Motor.c
  * @brief Motor 模块实现（PWM、方向、编码器与 PID）
@@ -28,6 +33,7 @@
 void Motor_Init(TIM_HandleTypeDef* htim, uint32_t Channel) {
     if (htim == NULL) return;
     HAL_TIM_Base_Start(htim);
+    HAL_TIM_PWM_Init(htim);
     HAL_TIM_PWM_Start(htim, Channel);
 }
 
@@ -102,7 +108,10 @@ void Motor_WheelInit(Motor_t* m,
     m->total_counts = 0;
     m->speed_m_s = 0.0f;
     m->rpm = 0.0f;
-    m->last_tick_ms = HAL_GetTick();
+    m->last_tick_ms = 0;
+    m->last_pwm_percent = 0;
+    m->boost_end_ms = 0;
+    m->invert_direction = false;
     m->pid.kp = 0.0f; m->pid.ki = 0.0f; m->pid.kd = 0.0f;
     m->pid.integrator = 0.0f; m->pid.prev_error = 0.0f;
     m->pid.integrator_limit = 1000.0f; m->pid.output_limit = 100.0f;
@@ -114,7 +123,7 @@ void Motor_WheelInit(Motor_t* m,
     if (htim_encoder) {
         HAL_TIM_Encoder_Start(htim_encoder, TIM_CHANNEL_ALL);
         m->last_encoder_count = (int32_t)__HAL_TIM_GET_COUNTER(htim_encoder);
-        m->last_tick_ms = HAL_GetTick();
+        /* keep last_tick_ms == 0 so first Motor_UpdateEncoder call sets baseline */
     }
 }
 
@@ -129,8 +138,30 @@ void Motor_WheelInit(Motor_t* m,
  */
 void Motor_StartWheel(Motor_t* m, uint16_t pwm_percent, uint8_t direction) {
     if (!m) return;
-    Motor_SetDirection(m->in_port, m->in_pin1, m->in_pin2, direction);
-    Motor_SetPWM(m->htim_pwm, m->pwm_channel, pwm_percent);
+    if (pwm_percent > 100) pwm_percent = 100;
+    uint32_t now = HAL_GetTick();
+
+    /* 决定实际写入的占空比：起动助力逻辑（使用可配置的全局参数） */
+    uint16_t effective_pwm = pwm_percent;
+    /* 若请求非零且上次为 0（刚从停止状态开始），且请求低于阈值，则开启短时助力 */
+    if (pwm_percent > 0 && m->last_pwm_percent == 0) {
+        if (pwm_percent < g_start_threshold_percent) {
+            m->boost_end_ms = now + g_start_boost_ms;
+            effective_pwm = g_start_boost_percent;
+        }
+    }
+    /* 如果处在助力期，则继续使用助力占空比 */
+    if (m->boost_end_ms != 0 && (int32_t)(m->boost_end_ms - now) > 0) {
+        effective_pwm = g_start_boost_percent;
+    }
+
+    /* 应用 per-wheel 方向反转（若配置） */
+    uint8_t actual_dir = (uint8_t)(direction ^ (m->invert_direction ? 1U : 0U));
+    Motor_SetDirection(m->in_port, m->in_pin1, m->in_pin2, actual_dir);
+    Motor_SetPWM(m->htim_pwm, m->pwm_channel, effective_pwm);
+
+    /* 保存请求的占空比（用于下一次判断是否从停止开始） */
+    m->last_pwm_percent = pwm_percent;
 }
 
 /**
@@ -142,22 +173,39 @@ void Motor_StopWheel(Motor_t* m) {
     Motor_SetPWM(m->htim_pwm, m->pwm_channel, 0);
     HAL_GPIO_WritePin(m->in_port, m->in_pin1, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(m->in_port, m->in_pin2, GPIO_PIN_RESET);
+    /* 停止时清除助力相关状态 */
+    m->last_pwm_percent = 0;
+    m->boost_end_ms = 0;
+}
+
+void Motor_SetDirectionInverted(Motor_t* m, bool inverted) {
+    if (!m) return;
+    m->invert_direction = inverted ? true : false;
 }
 
 /**
  * @brief 更新编码器计数并计算速度与里程
  * @param[in,out] m 目标 Motor_t
  * @note 读取 TIM CNT，计算差值并处理计数器回绕，按 encoder_ppr*gear_ratio*4 换算为转数
+        首次调用若 m->last_tick_ms == 0，将建立基准（仅采样并返回），随后调用才进行速度计算
 + * @attention 建议 10~100 ms 周期调用
  */
 void Motor_UpdateEncoder(Motor_t* m) {
     if (!m || !m->htim_encoder) return;
     uint32_t now = HAL_GetTick();
-    uint32_t dt_ms = now - m->last_tick_ms;
-    if (dt_ms == 0) return;
 
     uint32_t arr = (uint32_t)(m->htim_encoder->Instance->ARR);
     uint32_t cnt = __HAL_TIM_GET_COUNTER(m->htim_encoder);
+
+    if (m->last_tick_ms == 0) {
+        m->last_encoder_count = (int32_t)cnt;
+        m->last_tick_ms = now;
+        return;
+    }
+
+    uint32_t dt_ms = now - m->last_tick_ms;
+    if (dt_ms == 0) return;
+
     int32_t last = m->last_encoder_count;
     int32_t delta = (int32_t)cnt - last;
     int32_t arr_plus = (int32_t)arr + 1;
@@ -168,13 +216,13 @@ void Motor_UpdateEncoder(Motor_t* m) {
     m->total_counts += (int64_t)delta;
 
     float dt_s = ((float)dt_ms) / 1000.0f;
-    float counts_per_rev = (float)m->encoder_ppr * m->gear_ratio * 4.0f;
+    float counts_per_rev = (float)m->encoder_ppr * m->gear_ratio * MG310_QUADRATURE_MULT;//计算每转脉冲数（输出轴转动一圈对应的编码器计数）
     if (counts_per_rev <= 0.0f) counts_per_rev = 1.0f;
-    float revolutions = ((float)delta) / counts_per_rev;
-    float revs_per_sec = revolutions / dt_s;
-    m->rpm = revs_per_sec * 60.0f;
+    float revolutions = ((float)delta) / counts_per_rev;//计算增量转数
+    float revs_per_sec = revolutions / dt_s;//计算转速（转/秒）
+    m->rpm = revs_per_sec * 60.0f;//更新转速（RPM）（转/分钟）
     float circumference = M_PI * m->wheel_diameter_m;
-    m->speed_m_s = revs_per_sec * circumference;
+    m->speed_m_s = revs_per_sec * circumference;//更新线速度（米/秒）
 
     m->last_tick_ms = now;
 }
@@ -196,7 +244,7 @@ float Motor_GetSpeedMps(Motor_t* m) {
  */
 float Motor_GetDistanceM(Motor_t* m) {
     if (!m) return 0.0f;
-    float counts_per_rev = (float)m->encoder_ppr * m->gear_ratio * 4.0f;
+    float counts_per_rev = (float)m->encoder_ppr * m->gear_ratio * MG310_QUADRATURE_MULT;//输出轴转动一圈对应的编码器计数
     if (counts_per_rev <= 0.0f) return 0.0f;
     float revolutions = ((float)m->total_counts) / counts_per_rev;
     float circumference = M_PI * m->wheel_diameter_m;
@@ -258,16 +306,17 @@ float Motor_PIDCompute(Motor_t* m, float target_speed_m_s, float dt_s) {
     if (!m) return 0.0f;
     if (dt_s <= 0.0f) {
         uint32_t now = HAL_GetTick();
-        dt_s = ((float)(now - m->last_tick_ms)) / 1000.0f;
+        dt_s = ((float)(now - m->last_tick_ms)) / 1000.0f;//保证时间不为0或者负数
         if (dt_s <= 0.0f) dt_s = 1e-3f;
     }
-    float error = target_speed_m_s - m->speed_m_s;
-    m->pid.integrator += error * dt_s;
+    
+    float error = target_speed_m_s - m->speed_m_s;//误差
+    m->pid.integrator += error * dt_s;//积分项
     if (m->pid.integrator > m->pid.integrator_limit) m->pid.integrator = m->pid.integrator_limit;
     if (m->pid.integrator < -m->pid.integrator_limit) m->pid.integrator = -m->pid.integrator_limit;
-    float derivative = (error - m->pid.prev_error) / dt_s;
-    float output = m->pid.kp * error + m->pid.ki * m->pid.integrator + m->pid.kd * derivative;
-    m->pid.prev_error = error;
+    float derivative = (error - m->pid.prev_error) / dt_s;//微分项
+    float output = m->pid.kp * error + m->pid.ki * m->pid.integrator + m->pid.kd * derivative;//计算输出控制量
+    m->pid.prev_error = error;//更新前次误差
     if (output > m->pid.output_limit) output = m->pid.output_limit;
     if (output < -m->pid.output_limit) output = -m->pid.output_limit;
     return output;
@@ -276,11 +325,11 @@ float Motor_PIDCompute(Motor_t* m, float target_speed_m_s, float dt_s) {
 /* Helper: 将距离（米）换算为编码器脉冲数（带符号） */
 static int64_t Motor_DistanceToCounts(Motor_t* m, float distance_m) {
     if (!m) return 0;
-    float counts_per_rev = (float)m->encoder_ppr * m->gear_ratio * 4.0f;
-    float circumference = M_PI * m->wheel_diameter_m;
-    float revs = distance_m / circumference;
-    float counts_f = revs * counts_per_rev;
-    int64_t counts = (int64_t)(counts_f >= 0.0f ? counts_f + 0.5f : counts_f - 0.5f);
+    float counts_per_rev = (float)m->encoder_ppr * m->gear_ratio * MG310_QUADRATURE_MULT;//转一圈的脉冲数
+    float circumference = M_PI * m->wheel_diameter_m;//轮子周长
+    float revs = distance_m / circumference;//需要的转数
+    float counts_f = revs * counts_per_rev;//对应的脉冲数（浮点）
+    int64_t counts = (int64_t)(counts_f >= 0.0f ? counts_f + 0.5f : counts_f - 0.5f);//四舍五入取整
     return counts;
 }
 
@@ -293,6 +342,13 @@ void Motor_InitMG310Wheel(Motor_t* m,
                           TIM_HandleTypeDef* htim_encoder) {
     Motor_WheelInit(m, htim_pwm, pwm_channel, in_port, in_pin1, in_pin2,
                     htim_encoder, MG310_WHEEL_DIAMETER_M, MG310_ENCODER_PPR, MG310_GEAR_RATIO);
+    /* Apply sensible defaults for MG310 wheels */
+    Motor_PIDSetParams(m, 1.0f, 0.1f, 0.01f, 1000.0f, 100.0f);
+    Motor_PIDReset(m);
+    Motor_ResetDistance(m);
+    Motor_SetDirectionInverted(m, false);
+    /* Ensure start-boost params match header defaults (no-op if already default) */
+    Motor_SetStartBoostParams(MOTOR_START_THRESHOLD_PERCENT, MOTOR_START_BOOST_PERCENT, MOTOR_START_BOOST_MS);
 }
 
 /**
@@ -315,14 +371,14 @@ void RobotDrive_Init(RobotDrive_t* r, Motor_t* fl, Motor_t* fr, Motor_t* rl, Mot
 int Robot_MoveDistanceBlocking(RobotDrive_t* r, float distance_m, float speed_m_s) {
     if (!r || !r->fl || !r->fr || !r->rl || !r->rr) return -1;
     Motor_t* wheels[4] = { r->fl, r->fr, r->rl, r->rr };
-    int64_t target_counts = Motor_DistanceToCounts(wheels[0], distance_m);
+    int64_t target_counts = Motor_DistanceToCounts(wheels[0], distance_m);//将目标距离转换为目标编码器计数增量
     if (target_counts == 0) return 0;
     int sign = (distance_m >= 0.0f) ? 1 : -1;
 
     int64_t start_counts[4];
     for (int i = 0; i < 4; ++i) start_counts[i] = wheels[i]->total_counts;
 
-    const uint32_t control_ms = 20;
+    const uint32_t control_ms = 10;
     const float control_s = control_ms / 1000.0f;
     uint32_t t0 = HAL_GetTick();
     uint32_t timeout_ms = (uint32_t)((fabsf(distance_m) / fmaxf(fabsf(speed_m_s), 0.01f)) * 1000.0f) + 2000U;
@@ -336,7 +392,7 @@ int Robot_MoveDistanceBlocking(RobotDrive_t* r, float distance_m, float speed_m_
         float sum_m = 0.0f;
         for (int i = 0; i < 4; ++i) {
             int64_t delta = wheels[i]->total_counts - start_counts[i];
-            float counts_per_rev = (float)wheels[i]->encoder_ppr * wheels[i]->gear_ratio * 4.0f;
+            float counts_per_rev = (float)wheels[i]->encoder_ppr * wheels[i]->gear_ratio * MG310_QUADRATURE_MULT;
             float revs = (float)delta / counts_per_rev;
             float travelled = revs * (M_PI * wheels[i]->wheel_diameter_m);
             sum_m += travelled;
@@ -353,13 +409,33 @@ int Robot_MoveDistanceBlocking(RobotDrive_t* r, float distance_m, float speed_m_
         // 超时保护
         if ((now - t0) > timeout_ms) break;
 
-        // PID 控制每个轮子
-        for (int i = 0; i < 4; ++i) {
-            Motor_t* w = wheels[i];
-            float pid_out = Motor_PIDCompute(w, speed_m_s * sign, control_s);
-            uint16_t pwm = (uint16_t)fminf(fabsf(pid_out), 100.0f);
-            uint8_t dir = (pid_out >= 0.0f) ? 0 : 1;
-            Motor_StartWheel(w, pwm, dir);
+        /* 位置优先：外环按剩余距离生成速度参考，速度为次要目标 */
+        {
+            float pos_kp = MOTOR_POS_KP;//位置控制比例系数
+            float min_speed = MOTOR_POS_MIN_SPEED_M_S;//位置控制的最小速度（m/s），确保在接近目标时仍有足够动力克服静摩擦
+            float tol = MOTOR_POS_TOLERANCE_M;
+            float default_max_speed = 5.0f;
+            float max_speed = (speed_m_s > 0.0f) ? fabsf(speed_m_s) : default_max_speed;
+
+            float remaining = distance_m - avg_m; /* 带符号的剩余距离 */
+            float abs_rem = fabsf(remaining);
+            float desired_speed = fminf(max_speed, pos_kp * abs_rem);
+            if (abs_rem > tol && desired_speed < min_speed) desired_speed = min_speed;
+            int move_sign = (remaining >= 0.0f) ? 1 : -1;
+
+
+            for (int i = 0; i < 4; ++i) {
+                Motor_t* w = wheels[i];
+                float pid_out = Motor_PIDCompute(w, desired_speed * (float)move_sign, control_s);
+                
+                if (fabsf(pid_out) > 0 && fabsf(pid_out) < MIN_PWM_THRESHOLD) {
+                pid_out = (pid_out >= 0) ? MIN_PWM_THRESHOLD : -MIN_PWM_THRESHOLD;
+                }
+
+                uint16_t pwm = (uint16_t)fminf(fabsf(pid_out), 100.0f);
+                uint8_t dir = (pid_out >= 0.0f) ? 0 : 1;
+                Motor_StartWheel(w, pwm, dir);
+            }
         }
 
         HAL_Delay(control_ms);
@@ -391,10 +467,9 @@ int Robot_TurnAngleBlocking(RobotDrive_t* r, float angle_deg, float angular_spee
     int64_t start_l[2], start_r[2];
     for (int i = 0; i < 2; ++i) { start_l[i] = lefts[i]->total_counts; start_r[i] = rights[i]->total_counts; }
 
-    int64_t target_counts_left = Motor_DistanceToCounts(lefts[0], -wheel_s);
-    int64_t target_counts_right = Motor_DistanceToCounts(rights[0], wheel_s);
+    /* target counts not used; removed to avoid unused-variable warnings */
 
-    const uint32_t control_ms = 20;
+    const uint32_t control_ms = 10;
     const float control_s = control_ms / 1000.0f;
     uint32_t t0 = HAL_GetTick();
     uint32_t timeout_ms = (uint32_t)((fabsf(angle_deg) / fmaxf(fabsf(angular_speed_deg_s), 1.0f)) * 1000.0f) + 2000U;
@@ -409,8 +484,8 @@ int Robot_TurnAngleBlocking(RobotDrive_t* r, float angle_deg, float angular_spee
         for (int i = 0; i < 2; ++i) {
             int64_t dl = lefts[i]->total_counts - start_l[i];
             int64_t dr = rights[i]->total_counts - start_r[i];
-            float counts_per_rev_l = (float)lefts[i]->encoder_ppr * lefts[i]->gear_ratio * 4.0f;
-            float counts_per_rev_r = (float)rights[i]->encoder_ppr * rights[i]->gear_ratio * 4.0f;
+            float counts_per_rev_l = (float)lefts[i]->encoder_ppr * lefts[i]->gear_ratio * MG310_QUADRATURE_MULT;
+            float counts_per_rev_r = (float)rights[i]->encoder_ppr * rights[i]->gear_ratio * MG310_QUADRATURE_MULT;
             float travelled_l = (float)dl / counts_per_rev_l * (M_PI * lefts[i]->wheel_diameter_m);
             float travelled_r = (float)dr / counts_per_rev_r * (M_PI * rights[i]->wheel_diameter_m);
             sum_done += (-travelled_l + travelled_r) * 0.5f; // normalized toward target wheel_s
@@ -424,16 +499,33 @@ int Robot_TurnAngleBlocking(RobotDrive_t* r, float angle_deg, float angular_spee
 
         if ((now - t0) > timeout_ms) break;
 
-        // PID 控制：左右轮目标速度相反
-        for (int i = 0; i < 2; ++i) {
-            float pid_l = Motor_PIDCompute(lefts[i], -wheel_speed, control_s);
-            float pid_r = Motor_PIDCompute(rights[i], wheel_speed, control_s);
-            uint16_t pwm_l = (uint16_t)fminf(fabsf(pid_l), 100.0f);
-            uint16_t pwm_r = (uint16_t)fminf(fabsf(pid_r), 100.0f);
-            uint8_t dir_l = (pid_l >= 0.0f) ? 0 : 1;
-            uint8_t dir_r = (pid_r >= 0.0f) ? 0 : 1;
-            Motor_StartWheel(lefts[i], pwm_l, dir_l);
-            Motor_StartWheel(rights[i], pwm_r, dir_r);
+        /* 位置优先：外环按剩余角度（转换为单侧弧长）生成速度参考 */
+        {
+            float pos_kp = MOTOR_POS_KP;
+            float min_speed = MOTOR_POS_MIN_SPEED_M_S;
+            float tol = MOTOR_POS_TOLERANCE_M;
+            float default_max_speed = (wheel_speed > 0.0f) ? fabsf(wheel_speed) : 5.0f;
+            float max_speed = default_max_speed;
+
+            /* 带符号的剩余弧长（m） */
+            float remaining = wheel_s - avg_done;
+            float abs_rem = fabsf(remaining);
+            float desired_speed = fminf(max_speed, pos_kp * abs_rem);
+            if (abs_rem > tol && desired_speed < min_speed) desired_speed = min_speed;
+            int angle_sign = (angle_deg >= 0.0f) ? 1 : -1;
+
+            for (int i = 0; i < 2; ++i) {
+                float target_l = -((float)angle_sign) * desired_speed;
+                float target_r = ((float)angle_sign) * desired_speed;
+                float pid_l = Motor_PIDCompute(lefts[i], target_l, control_s);
+                float pid_r = Motor_PIDCompute(rights[i], target_r, control_s);
+                uint16_t pwm_l = (uint16_t)fminf(fabsf(pid_l), 100.0f);
+                uint16_t pwm_r = (uint16_t)fminf(fabsf(pid_r), 100.0f);
+                uint8_t dir_l = (pid_l >= 0.0f) ? 0 : 1;
+                uint8_t dir_r = (pid_r >= 0.0f) ? 0 : 1;
+                Motor_StartWheel(lefts[i], pwm_l, dir_l);
+                Motor_StartWheel(rights[i], pwm_r, dir_r);
+            }
         }
 
         HAL_Delay(control_ms);
@@ -450,12 +542,12 @@ int Robot_TurnAngleBlocking(RobotDrive_t* r, float angle_deg, float angular_spee
 int Robot_MoveGridCellsBlocking(RobotDrive_t* r, int cells, float speed_m_s) {
     if (!r) return -1;
     int sign = (cells >= 0) ? 1 : -1;
-    int n = abs(cells);
+    int n = (cells >= 0) ? cells : -cells;
     if (n == 0) return 0;
     // 计算距离：n 个格子中心间距 = n * cell_size + (n - 1) * line_width
     float cell = GRID_DEFAULT_CELL_M;
     float linew = GRID_DEFAULT_LINE_WIDTH_M;
-    float distance = (float)n * cell + (float)fmaxf(0, n - 1) * linew;
+    float distance = (float)n * cell + fmaxf(0.0f, (float)(n - 1)) * linew;
     distance *= sign;
     return Robot_MoveDistanceBlocking(r, distance, speed_m_s);
 }
@@ -472,7 +564,7 @@ int Motor_RotateRevolutionsBlocking(Motor_t* m, float revolutions, float speed_m
     int64_t start = m->total_counts;
     int64_t target = start + Motor_DistanceToCounts(m, distance);
 
-    const uint32_t control_ms = 20;
+    const uint32_t control_ms = 10;
     const float control_s = control_ms / 1000.0f;
     uint32_t t0 = HAL_GetTick();
     uint32_t timeout_ms = (uint32_t)((fabsf(distance) / fmaxf(fabsf(speed_m_s), 0.01f)) * 1000.0f) + 2000U;
@@ -484,14 +576,28 @@ int Motor_RotateRevolutionsBlocking(Motor_t* m, float revolutions, float speed_m
             if (cur - start >= target - start - 1) break;
         } else {
             if (cur - start <= target - start + 1) break;
+        }//判断是否达到目标（允许1个计数的误差）
+
+        if ((HAL_GetTick() - t0) > timeout_ms) break;//超时退出
+
+        /* 位置优先：按剩余距离生成速度参考，再走速度 PID */
+        {
+            float circumference = M_PI * m->wheel_diameter_m;
+            float counts_per_rev = (float)m->encoder_ppr * m->gear_ratio * MG310_QUADRATURE_MULT;
+            float travelled_revs = ((float)(cur - start)) / counts_per_rev;
+            float travelled_m = travelled_revs * circumference;
+            float remaining = distance - travelled_m; /* 带符号 */
+            float abs_rem = fabsf(remaining);
+            float max_speed = (speed_m_s > 0.0f) ? fabsf(speed_m_s) : 5.0f;
+            float desired_speed = fminf(max_speed, MOTOR_POS_KP * abs_rem);
+            if (abs_rem > MOTOR_POS_TOLERANCE_M && desired_speed < MOTOR_POS_MIN_SPEED_M_S) desired_speed = MOTOR_POS_MIN_SPEED_M_S;
+            int move_sign = (remaining >= 0.0f) ? 1 : -1;
+
+            float pid = Motor_PIDCompute(m, desired_speed * (float)move_sign, control_s);
+            uint16_t pwm = (uint16_t)fminf(fabsf(pid), 100.0f);
+            uint8_t dir = (pid >= 0.0f) ? 0 : 1;
+            Motor_StartWheel(m, pwm, dir);
         }
-
-        if ((HAL_GetTick() - t0) > timeout_ms) break;
-
-        float pid = Motor_PIDCompute(m, (distance >= 0) ? fabsf(speed_m_s) : -fabsf(speed_m_s), control_s);
-        uint16_t pwm = (uint16_t)fminf(fabsf(pid), 100.0f);
-        uint8_t dir = (pid >= 0.0f) ? 0 : 1;
-        Motor_StartWheel(m, pwm, dir);
         HAL_Delay(control_ms);
     }
 
@@ -506,4 +612,52 @@ int Robot_RotateWheelsRevolutionsBlocking(RobotDrive_t* r, float revolutions, fl
     if (!r) return -1;
     float distance = revolutions * M_PI * r->fl->wheel_diameter_m;
     return Robot_MoveDistanceBlocking(r, distance, speed_m_s);
+}
+
+/**
+ * @brief 根据当前 PID 状态预测控制输出对应的 PWM 百分比（绝对值），不修改内部状态
+ */
+float Motor_PredictPWMPercent(Motor_t* m, float target_speed_m_s, float dt_s) {
+    if (!m) return 0.0f;
+    if (dt_s <= 0.0f) dt_s = 0.02f; /* 默认 20 ms */
+    float error = target_speed_m_s - m->speed_m_s;
+    float integrator = m->pid.integrator + error * dt_s;
+    if (integrator > m->pid.integrator_limit) integrator = m->pid.integrator_limit;
+    if (integrator < -m->pid.integrator_limit) integrator = -m->pid.integrator_limit;
+    float derivative = (error - m->pid.prev_error) / dt_s;
+    float output = m->pid.kp * error + m->pid.ki * integrator + m->pid.kd * derivative;
+    if (output > m->pid.output_limit) output = m->pid.output_limit;
+    if (output < -m->pid.output_limit) output = -m->pid.output_limit;
+    return fabsf(output);
+}
+
+/**
+ * @brief 判断预测 PWM 是否低于阈值（用于在调用前给出提醒）
+ */
+bool Motor_IsPredictedPWMBelow(Motor_t* m, float target_speed_m_s, float dt_s, uint16_t threshold_percent) {
+    float predicted = Motor_PredictPWMPercent(m, target_speed_m_s, dt_s);
+    return (predicted < (float)threshold_percent);
+}
+
+/**
+ * @brief 设置起动助力参数（运行时修改）
+ * @param[in] threshold_percent 触发助力的请求占空比阈值（0..100）
+ * @param[in] boost_percent 助力期间使用的占空比（0..100）
+ * @param[in] boost_ms 助力持续时间（毫秒）
+ */
+void Motor_SetStartBoostParams(uint16_t threshold_percent, uint16_t boost_percent, uint32_t boost_ms) {
+    if (threshold_percent > 100) threshold_percent = 100;
+    if (boost_percent > 100) boost_percent = 100;
+    g_start_threshold_percent = threshold_percent;
+    g_start_boost_percent = boost_percent;
+    g_start_boost_ms = boost_ms;
+}
+
+/**
+ * @brief 获取当前起动助力参数
+ */
+void Motor_GetStartBoostParams(uint16_t* threshold_percent, uint16_t* boost_percent, uint32_t* boost_ms) {
+    if (threshold_percent) *threshold_percent = g_start_threshold_percent;
+    if (boost_percent) *boost_percent = g_start_boost_percent;
+    if (boost_ms) *boost_ms = g_start_boost_ms;
 }

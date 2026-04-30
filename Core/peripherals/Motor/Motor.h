@@ -2,6 +2,7 @@
 #define __MOTOR_H
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "stm32f4xx_hal.h"
 
 #ifdef __cplusplus
@@ -70,6 +71,9 @@ typedef struct {
 	float speed_m_s;               /**< 最近一次计算得到的速度（米/秒） */
 	float rpm;                     /**< 最近一次计算得到的电机轴 RPM */
 	uint32_t last_tick_ms;         /**< 上次更新时间（毫秒） */
+    uint16_t last_pwm_percent;     /**< 上次请求的 PWM 占空比（0..100） */
+    uint32_t boost_end_ms;         /**< 助力截止时间（HAL_GetTick 毫秒），0 表示未处于助力期 */
+	bool invert_direction;         /**< 若为 true，则对传入的方向取反（用于安装方向差异） */
 	struct {
 		float kp;                  /**< PID 比例系数 */
 		float ki;                  /**< PID 积分系数 */
@@ -81,16 +85,35 @@ typedef struct {
 	} pid; /**< PID 状态 */
 } Motor_t;
 
-/** MG310 默认参数 */
-#define MG310_ENCODER_PPR 13U
-#define MG310_GEAR_RATIO 20.0f
-#define MG310_WHEEL_DIAMETER_M 0.048f
-#define MG310_QUADRATURE_MULT 4.0f
+/** MG310 和麦轮 默认参数 */
+#define MG310_ENCODER_PPR 13U//线数
+#define MG310_GEAR_RATIO 20.0f//减速比
+#define MG310_WHEEL_DIAMETER_M 0.048f//麦轮直径
+#define MG310_QUADRATURE_MULT 4.0f//倍频，实际每转脉冲数 = 线数 * 减速比 * 倍频
+
+/* 起动助力配置（可按需调整） */
+#define MOTOR_START_THRESHOLD_PERCENT 20U  /**< 若请求占空比低于此值且电机先前为停止，则触发短时助力 */
+#define MOTOR_START_BOOST_PERCENT 60U      /**< 助力期间使用的占空比（短时） */
+#define MOTOR_START_BOOST_MS 80U           /**< 助力持续时长（毫秒） */
+#define MIN_PWM_THRESHOLD 50.0f 			/**< 最小 PWM 阈值，低于此值可能无法克服静摩擦 */
+
+/** 底盘默认参数 */
+#define ROBOT_TRACK_WIDTH_M 0.166f//左右轮中心距离
+#define ROBOT_WHEEL_BASE_M 0.125f//前后轮中心距离
 
 /** 网格默认参数（可在调用时覆盖） */
-#define GRID_DEFAULT_CELL_M 0.300f
-#define GRID_DEFAULT_LINE_WIDTH_M 0.007f
-#define GRID_DEFAULT_TOLERANCE_M 0.010f
+#define GRID_DEFAULT_CELL_M 0.300f//格子长度
+#define GRID_DEFAULT_LINE_WIDTH_M 0.007f//线条宽度
+#define GRID_DEFAULT_TOLERANCE_M 0.010f//容差
+
+/* 位置优先控制参数（外环）
+ * - 用于把“到位”作为第一目标，速度为第二目标。
+ * - 这些默认值可通过 Motor_SetStartBoostParams()/Motor_GetStartBoostParams
+ *   或将来添加的 setter/getter 调整。
+ */
+#define MOTOR_POS_KP 2.0f               /**< 位置到速度的比例系数（m -> m/s） */
+#define MOTOR_POS_MIN_SPEED_M_S 2.0f   /**< 外环允许的最小速度（m/s），避免低速无法起动 */
+#define MOTOR_POS_TOLERANCE_M 0.002f    /**< 位置收敛容差（米） */
 
 /**
  * @brief 初始化一个基于 MG310 的轮子（便捷封装）
@@ -117,15 +140,6 @@ void Motor_InitMG310Wheel(Motor_t* m,
 int Motor_RotateRevolutionsBlocking(Motor_t* m, float revolutions, float speed_m_s);
 
 /**
- * @brief 使整个底盘按轮子圈数移动（每个轮子转相同圈数，阻塞）
- * @param[in] r 底盘
- * @param[in] revolutions 每个轮子要转的圈数（正为前进）
- * @param[in] speed_m_s 目标线速度（米/秒）
- * @return 0 成功，非0 失败
- */
-int Robot_RotateWheelsRevolutionsBlocking(RobotDrive_t* r, float revolutions, float speed_m_s);
-
-/**
  * @brief 机器人底盘封装（四轮）
  */
 typedef struct {
@@ -136,6 +150,15 @@ typedef struct {
 	float track_width_m; /**< 左右轮中心间距（m），用于自转角度换算 */
 	float wheel_base_m;  /**< 前后轮中心间距（m），预留 */
 } RobotDrive_t;
+
+/**
+ * @brief 使整个底盘按轮子圈数移动（每个轮子转相同圈数，阻塞）
+ * @param[in] r 底盘
+ * @param[in] revolutions 每个轮子要转的圈数（正为前进）
+ * @param[in] speed_m_s 目标线速度（米/秒）
+ * @return 0 成功，非0 失败
+ */
+int Robot_RotateWheelsRevolutionsBlocking(RobotDrive_t* r, float revolutions, float speed_m_s);
 
 /**
  * @brief 初始化底盘结构
@@ -215,20 +238,73 @@ void Motor_WheelInit(Motor_t* m,
 					 GPIO_TypeDef* in_port, uint16_t in_pin1, uint16_t in_pin2,
 					 TIM_HandleTypeDef* htim_encoder,
 					 float wheel_diameter_m, uint32_t encoder_ppr, float gear_ratio);
+/**
+ * @note 初始化时会将 m->last_tick_ms 置为 0；首次调用 @ref Motor_UpdateEncoder
+ *       会采样编码器并建立时间基准，避免初始化后长时间未启动造成的 dt 爆发。
+ */
 
 /**
  * @brief 设置方向并将 PWM 设置为指定占空比，启动电机
+ *
+ * 行为说明：
+ * - 为了克服静摩擦与起动扭矩，库实现了“起动助力”策略：当请求的 `pwm_percent`
+ *   大于 0 且小于 `MOTOR_START_THRESHOLD_PERCENT` 且电机先前处于停止（上次 PWM==0），
+ *   驱动会在短时间内（`MOTOR_START_BOOST_MS` 毫秒）将占空比提升到
+ *   `MOTOR_START_BOOST_PERCENT` 以保证能起动，然后再回落到请求值。
+ * - 助力期间由 `m->boost_end_ms` 跟踪（内部管理），用户无需手动清理。
+ * - 若你想在调用前检测某个目标速度是否会产生低于指定阈值（例如 50%）的 PWM，
+ *   可使用 `Motor_PredictPWMPercent()` 或 `Motor_IsPredictedPWMBelow()` 来做提醒。
+ *
  * @param[in,out] m 目标 Motor_t
- * @param[in] pwm_percent 占空比 0..100
+ * @param[in] pwm_percent 占空比 0..100（请求值）
  * @param[in] direction 方向标志（0 或 1，见 Motor_SetDirection）
  */
 void Motor_StartWheel(Motor_t* m, uint16_t pwm_percent, uint8_t direction);
+
+/**
+ * @brief 根据当前 PID 状态与速度预测控制输出对应的 PWM 百分比（绝对值）
+ * @param[in] m 目标 Motor_t
+ * @param[in] target_speed_m_s 目标速度（m/s）
+ * @param[in] dt_s 估计控制周期（秒），传入 <=0 时使用 0.02s 作为默认值
+ * @return 预测的 PWM 百分比（0..output_limit），不改变 `m` 内部 PID 状态
+ */
+float Motor_PredictPWMPercent(Motor_t* m, float target_speed_m_s, float dt_s);
+
+/**
+ * @brief 检查预测得到的 PWM 是否低于指定阈值（用于在调用前提醒）
+ * @param[in] m 目标 Motor_t
+ * @param[in] target_speed_m_s 目标速度（m/s）
+ * @param[in] dt_s 估计控制周期（秒），传入 <=0 时使用 0.02s 作为默认值
+ * @param[in] threshold_percent 要比较的阈值（例如 50）
+ * @return true 如果预测 PWM 百分比 < threshold_percent
+ */
+bool Motor_IsPredictedPWMBelow(Motor_t* m, float target_speed_m_s, float dt_s, uint16_t threshold_percent);
+
+/**
+ * @brief 运行时设置起动助力参数
+ * @param[in] threshold_percent 触发助力的请求占空比阈值（0..100）
+ * @param[in] boost_percent 助力期间使用的占空比（0..100）
+ * @param[in] boost_ms 助力持续时间（毫秒）
+ */
+void Motor_SetStartBoostParams(uint16_t threshold_percent, uint16_t boost_percent, uint32_t boost_ms);
+
+/**
+ * @brief 获取当前起动助力参数
+ */
+void Motor_GetStartBoostParams(uint16_t* threshold_percent, uint16_t* boost_percent, uint32_t* boost_ms);
 
 /**
  * @brief 停止电机并将方向引脚拉低
  * @param[in,out] m 目标 Motor_t
  */
 void Motor_StopWheel(Motor_t* m);
+
+/**
+ * @brief 运行时设置单轮方向是否反向
+ * @param[in] m 目标 Motor_t
+ * @param[in] inverted true 则将传入的方向位反转
+ */
+void Motor_SetDirectionInverted(Motor_t* m, bool inverted);
 
 /**
  * @brief 更新编码器计数并计算速度与里程
@@ -274,6 +350,7 @@ void Motor_PIDSetParams(Motor_t* m, float kp, float ki, float kd,
  * @param[in,out] m 目标 Motor_t
  * @param[in] target_speed_m_s 目标速度（米/秒）
  * @param[in] dt_s 控制周期（秒）。如果传入 <=0，函数内部会使用 `HAL_GetTick()` 和 `m->last_tick_ms` 估算
+ * @note 函数会对估算出的 dt 做上下限保护（防止异常大 dt 导致积分瞬间增大）。
  * @return 带符号控制量（-output_limit .. +output_limit），符号表示方向
  */
 float Motor_PIDCompute(Motor_t* m, float target_speed_m_s, float dt_s);

@@ -19,7 +19,6 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "i2c.h"
-#include "stm32f4xx_hal.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
@@ -31,6 +30,7 @@
 #include "Motor.h"
 #include "Camera.h"
 #include "Bluetooth.h"
+#include <stdbool.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -51,7 +51,9 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-/* cam_rx_byte is defined in Camera.c */
+// cam_rx_byte is defined in Camera.c
+Motor_t wheelM1_fl, wheelM2_fr, wheelM3_rl, wheelM4_rr;
+RobotDrive_t robot_drive;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -62,26 +64,6 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-  if (huart == BLUETOOTH_UART_HANDLE) {
-    extern uint8_t Bluetooth_Rx_Buffer[BLUETOOTH_RX_BUFFER_SIZE]; // 蓝牙接收缓冲区
-    if (Bluetooth_Rx_Buffer[0] == 'M' || Bluetooth_Rx_Buffer[0] == 'R' || Bluetooth_Rx_Buffer[0] == 'G') {
-        HAL_UART_Transmit_IT(CAMERA_UART_HANDLE, Bluetooth_Rx_Buffer, sizeof(Bluetooth_Rx_Buffer));
-    } else if (Bluetooth_Rx_Buffer[0] == 'B') {
-      //控制小车回去的逻辑
-    }
-    HAL_UART_Receive_IT(BLUETOOTH_UART_HANDLE, Bluetooth_Rx_Buffer, sizeof(Bluetooth_Rx_Buffer));
-  }
-  else if (huart == CAMERA_UART_HANDLE) {
-    // 逐字节交给摄像头解析模块处理
-    CAMERA_UART_Receive_Process(cam_rx_byte);
-    //开启下一次接收
-    HAL_UART_Receive_IT(CAMERA_UART_HANDLE, &cam_rx_byte, 1);
-  }
-}
-
 
 
 /* USER CODE END 0 */
@@ -104,6 +86,7 @@ int main(void)
 
   /* USER CODE BEGIN Init */
 
+
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -125,6 +108,21 @@ int main(void)
   MX_TIM5_Init();
   MX_TIM8_Init();
   /* USER CODE BEGIN 2 */
+  
+  // 电机与底盘初始化
+  Motor_InitMG310Wheel(&wheelM1_fl, M1_EN_TIM, M1_EN_CHANNEL, GPIOB, GPIO_PIN_0, GPIO_PIN_1, M1_Encoder_TIM);
+  Motor_InitMG310Wheel(&wheelM2_fr, M2_EN_TIM, M2_EN_CHANNEL, GPIOC, GPIO_PIN_0, GPIO_PIN_1, M2_Encoder_TIM);
+  Motor_InitMG310Wheel(&wheelM3_rl, M3_EN_TIM, M3_EN_CHANNEL, GPIOD, GPIO_PIN_14, GPIO_PIN_15, M3_Encoder_TIM);
+  Motor_InitMG310Wheel(&wheelM4_rr, M4_EN_TIM, M4_EN_CHANNEL, GPIOD, GPIO_PIN_10, GPIO_PIN_11, M4_Encoder_TIM);
+  Motor_SetDirectionInverted(&wheelM1_fl, true);
+  Motor_SetDirectionInverted(&wheelM3_rl, true);
+  RobotDrive_Init(&robot_drive, &wheelM1_fl, &wheelM2_fr, &wheelM3_rl, &wheelM4_rr, ROBOT_TRACK_WIDTH_M, ROBOT_WHEEL_BASE_M);
+  //电机PID参数设置
+  Motor_PIDSetParams(&wheelM1_fl, 35.0f, 15.0f, 3.0f, 1000.0f, 100.0f);
+  Motor_PIDSetParams(&wheelM2_fr, 35.0f, 15.0f, 3.0f, 1000.0f, 100.0f);
+  Motor_PIDSetParams(&wheelM3_rl, 35.0f, 15.0f, 3.0f, 1000.0f, 100.0f);
+  Motor_PIDSetParams(&wheelM4_rr, 35.0f, 15.0f, 3.0f, 1000.0f, 100.0f);
+
   //OLED初始化
   HAL_Delay(20);
   OLED_Init();
@@ -132,6 +130,14 @@ int main(void)
   CAMERA_Init();
   //蓝牙初始化
   BLUETOOTH_Init();
+
+
+  // Motor_StartWheel(&wheelM1_fl, 60, 0); 
+  // Motor_RotateRevolutionsBlocking(&wheelM1_fl, 5, 2.0f);
+  // Motor_RotateRevolutionsBlocking(&wheelM2_fr, 5, 0.2F);
+  // Motor_RotateRevolutionsBlocking(&wheelM3_rl, 5, 0.2F);
+  // Motor_RotateRevolutionsBlocking(&wheelM4_rr, 5, 0.2F);
+  Robot_RotateWheelsRevolutionsBlocking(&robot_drive, 1, 2.0f);
 
   /* USER CODE END 2 */
 
@@ -142,6 +148,14 @@ int main(void)
     //OLED测试
     // OLED_PrintString(1, 1, "动物", &font16x16, OLED_COLOR_NORMAL);
     // OLED_ShowFrame();
+
+    //电机测试：每个轮子转 5 圈，线速度 0.2 m/s
+
+    // HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
+    // HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
+    // __HAL_TIM_SET_COMPARE(M1_EN_TIM, TIM_CHANNEL_1, 100); 
+    // HAL_TIM_PWM_Start(M1_EN_TIM, M1_EN_CHANNEL);
+
 
     if(Show_permission == 1){
       
@@ -160,7 +174,7 @@ int main(void)
         }
 
       OLED_ShowFrame();//一直显示在屏幕上，直到下一次更新
-      Show_permission = 2;//显示完成
+      Show_permission = 0;//显示完成
     }
     
 
@@ -169,7 +183,6 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
   }
-
   /* USER CODE END 3 */
 }
 
@@ -190,13 +203,12 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-  RCC_OscInitStruct.PLL.PLLM = 8;
-  RCC_OscInitStruct.PLL.PLLN = 72;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLM = 4;
+  RCC_OscInitStruct.PLL.PLLN = 168;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
   RCC_OscInitStruct.PLL.PLLQ = 4;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
@@ -210,16 +222,40 @@ void SystemClock_Config(void)
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK)
   {
     Error_Handler();
   }
+
+  /** Enables the Clock Security System
+  */
+  HAL_RCC_EnableCSS();
 }
 
 /* USER CODE BEGIN 4 */
+
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
+  if (huart == BLUETOOTH_UART_HANDLE) {
+    extern uint8_t Bluetooth_Rx_Buffer[BLUETOOTH_RX_BUFFER_SIZE]; // 蓝牙接收缓冲区
+    if (Bluetooth_Rx_Buffer[0] == 'M' || Bluetooth_Rx_Buffer[0] == 'R' || Bluetooth_Rx_Buffer[0] == 'G') {
+      HAL_UART_Transmit_IT(CAMERA_UART_HANDLE, Bluetooth_Rx_Buffer, sizeof(Bluetooth_Rx_Buffer));
+    } else if (Bluetooth_Rx_Buffer[0] == 'B') {
+      // 控制小车回去的逻辑（用户实现）
+    }
+    HAL_UART_Receive_IT(BLUETOOTH_UART_HANDLE, Bluetooth_Rx_Buffer, sizeof(Bluetooth_Rx_Buffer));
+  }
+  else if (huart == CAMERA_UART_HANDLE) {
+    // 逐字节交给摄像头解析模块处理
+    CAMERA_UART_Receive_Process(cam_rx_byte);
+    // 开启下一次接收
+    HAL_UART_Receive_IT(CAMERA_UART_HANDLE, &cam_rx_byte, 1);
+  }
+}
+
 
 /* USER CODE END 4 */
 
