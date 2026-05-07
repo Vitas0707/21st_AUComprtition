@@ -95,7 +95,7 @@ typedef struct {
 #define MOTOR_START_THRESHOLD_PERCENT 20U  /**< 若请求占空比低于此值且电机先前为停止，则触发短时助力 */
 #define MOTOR_START_BOOST_PERCENT 60U      /**< 助力期间使用的占空比（短时） */
 #define MOTOR_START_BOOST_MS 80U           /**< 助力持续时长（毫秒） */
-#define MIN_PWM_THRESHOLD 50.0f 			/**< 最小 PWM 阈值，低于此值可能无法克服静摩擦 */
+#define MIN_PWM_THRESHOLD 60.0f 			/**< 最小 PWM 阈值，低于此值可能无法克服静摩擦 */
 
 /** 底盘默认参数 */
 #define ROBOT_TRACK_WIDTH_M 0.166f//左右轮中心距离
