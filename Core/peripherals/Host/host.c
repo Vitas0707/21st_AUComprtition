@@ -6,7 +6,6 @@
 
 #define HOST_UART_HANDLE (&huart4)
 
-
 ssize_t _write(int file, char *ptr, int len)
 {
     //判断文件描述符
