@@ -13,7 +13,9 @@
 //定义步数存储长度
 #define MAX_STEPS 100
 //定义状态
-
+extern uint8_t Show_permission;//是否允许显示屏显示内容
+extern uint8_t Move_permission;//是否在移动
+extern uint8_t Revolve_permission;//是否在转圈
 
 // --- 解析后的数据结构 ---
 typedef struct {

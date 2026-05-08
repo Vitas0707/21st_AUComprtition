@@ -31,6 +31,7 @@
 #include "Camera.h"
 #include "Bluetooth.h"
 #include <stdbool.h>
+#include "host.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -107,6 +108,7 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM5_Init();
   MX_TIM8_Init();
+  MX_UART4_Init();
   /* USER CODE BEGIN 2 */
   
   // 电机与底盘初始化
@@ -118,9 +120,11 @@ int main(void)
   Motor_SetDirectionInverted(&wheelM3_rl, true);
   RobotDrive_Init(&robot_drive, &wheelM1_fl, &wheelM2_fr, &wheelM3_rl, &wheelM4_rr, ROBOT_TRACK_WIDTH_M, ROBOT_WHEEL_BASE_M);
   //电机PID参数设置
-  Motor_PIDSetParams(&wheelM1_fl, 35.0f, 15.0f, 3.0f, 1000.0f, 100.0f);
+  // 左轮（前左和后左）设置较低的Kp以减速
+  Motor_PIDSetParams(&wheelM1_fl, 25.0f, 15.0f, 3.0f, 1000.0f, 100.0f);  // 降低Kp从35到25
+  Motor_PIDSetParams(&wheelM3_rl, 25.0f, 15.0f, 3.0f, 1000.0f, 100.0f);  // 降低Kp从35到25
+  // 右轮保持原参数
   Motor_PIDSetParams(&wheelM2_fr, 35.0f, 15.0f, 3.0f, 1000.0f, 100.0f);
-  Motor_PIDSetParams(&wheelM3_rl, 35.0f, 15.0f, 3.0f, 1000.0f, 100.0f);
   Motor_PIDSetParams(&wheelM4_rr, 35.0f, 15.0f, 3.0f, 1000.0f, 100.0f);
 
   //OLED初始化
@@ -175,6 +179,13 @@ int main(void)
 
       OLED_ShowFrame();//一直显示在屏幕上，直到下一次更新
       Show_permission = 0;//显示完成
+    }
+
+    else if(Revolve_permission == 1){
+      for(int i = 0;i<Camera_Data.value;i++){
+        Robot_TurnAngleBlocking(&robot_drive, 360, 90.0f); // 自转 360 度，角速度 90 度/秒
+      }
+      Revolve_permission = 0;//转圈完成
     }
     
 

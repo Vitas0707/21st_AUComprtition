@@ -10,10 +10,6 @@
 #ifndef M_PI
 #define M_PI 3.14159265358979323846f
 #endif
-/* 运行时可配置的起动助力参数（默认为头文件中的宏） */
-static uint16_t g_start_threshold_percent = MOTOR_START_THRESHOLD_PERCENT;
-static uint16_t g_start_boost_percent = MOTOR_START_BOOST_PERCENT;
-static uint32_t g_start_boost_ms = MOTOR_START_BOOST_MS;
 /**
  * @file Motor.c
  * @brief Motor 模块实现（PWM、方向、编码器与 PID）
@@ -109,8 +105,6 @@ void Motor_WheelInit(Motor_t* m,
     m->speed_m_s = 0.0f;
     m->rpm = 0.0f;
     m->last_tick_ms = 0;
-    m->last_pwm_percent = 0;
-    m->boost_end_ms = 0;
     m->invert_direction = false;
     m->pid.kp = 0.0f; m->pid.ki = 0.0f; m->pid.kd = 0.0f;
     m->pid.integrator = 0.0f; m->pid.prev_error = 0.0f;
@@ -139,29 +133,11 @@ void Motor_WheelInit(Motor_t* m,
 void Motor_StartWheel(Motor_t* m, uint16_t pwm_percent, uint8_t direction) {
     if (!m) return;
     if (pwm_percent > 100) pwm_percent = 100;
-    uint32_t now = HAL_GetTick();
-
-    /* 决定实际写入的占空比：起动助力逻辑（使用可配置的全局参数） */
-    uint16_t effective_pwm = pwm_percent;
-    /* 若请求非零且上次为 0（刚从停止状态开始），且请求低于阈值，则开启短时助力 */
-    if (pwm_percent > 0 && m->last_pwm_percent == 0) {
-        if (pwm_percent < g_start_threshold_percent) {
-            m->boost_end_ms = now + g_start_boost_ms;
-            effective_pwm = g_start_boost_percent;
-        }
-    }
-    /* 如果处在助力期，则继续使用助力占空比 */
-    if (m->boost_end_ms != 0 && (int32_t)(m->boost_end_ms - now) > 0) {
-        effective_pwm = g_start_boost_percent;
-    }
 
     /* 应用 per-wheel 方向反转（若配置） */
     uint8_t actual_dir = (uint8_t)(direction ^ (m->invert_direction ? 1U : 0U));
     Motor_SetDirection(m->in_port, m->in_pin1, m->in_pin2, actual_dir);
-    Motor_SetPWM(m->htim_pwm, m->pwm_channel, effective_pwm);
-
-    /* 保存请求的占空比（用于下一次判断是否从停止开始） */
-    m->last_pwm_percent = pwm_percent;
+    Motor_SetPWM(m->htim_pwm, m->pwm_channel, pwm_percent);
 }
 
 /**
@@ -173,9 +149,6 @@ void Motor_StopWheel(Motor_t* m) {
     Motor_SetPWM(m->htim_pwm, m->pwm_channel, 0);
     HAL_GPIO_WritePin(m->in_port, m->in_pin1, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(m->in_port, m->in_pin2, GPIO_PIN_RESET);
-    /* 停止时清除助力相关状态 */
-    m->last_pwm_percent = 0;
-    m->boost_end_ms = 0;
 }
 
 void Motor_SetDirectionInverted(Motor_t* m, bool inverted) {
@@ -197,6 +170,7 @@ void Motor_UpdateEncoder(Motor_t* m) {
     uint32_t arr = (uint32_t)(m->htim_encoder->Instance->ARR);
     uint32_t cnt = __HAL_TIM_GET_COUNTER(m->htim_encoder);
 
+    //如果未开启计时，则以首次调用为基准建立时间戳和计数基线，避免长时间未启动后 dt 爆发
     if (m->last_tick_ms == 0) {
         m->last_encoder_count = (int32_t)cnt;
         m->last_tick_ms = now;
@@ -216,7 +190,7 @@ void Motor_UpdateEncoder(Motor_t* m) {
     m->total_counts += (int64_t)delta;
 
     float dt_s = ((float)dt_ms) / 1000.0f;
-    float counts_per_rev = (float)m->encoder_ppr * m->gear_ratio * MG310_QUADRATURE_MULT;//计算每转脉冲数（输出轴转动一圈对应的编码器计数）
+    float counts_per_rev = (float)m->encoder_ppr * m->gear_ratio * MG310_QUADRATURE_MULT;
     if (counts_per_rev <= 0.0f) counts_per_rev = 1.0f;
     float revolutions = ((float)delta) / counts_per_rev;//计算增量转数
     float revs_per_sec = revolutions / dt_s;//计算转速（转/秒）
@@ -347,8 +321,6 @@ void Motor_InitMG310Wheel(Motor_t* m,
     Motor_PIDReset(m);
     Motor_ResetDistance(m);
     Motor_SetDirectionInverted(m, false);
-    /* Ensure start-boost params match header defaults (no-op if already default) */
-    Motor_SetStartBoostParams(MOTOR_START_THRESHOLD_PERCENT, MOTOR_START_BOOST_PERCENT, MOTOR_START_BOOST_MS);
 }
 
 /**
@@ -639,25 +611,3 @@ bool Motor_IsPredictedPWMBelow(Motor_t* m, float target_speed_m_s, float dt_s, u
     return (predicted < (float)threshold_percent);
 }
 
-/**
- * @brief 设置起动助力参数（运行时修改）
- * @param[in] threshold_percent 触发助力的请求占空比阈值（0..100）
- * @param[in] boost_percent 助力期间使用的占空比（0..100）
- * @param[in] boost_ms 助力持续时间（毫秒）
- */
-void Motor_SetStartBoostParams(uint16_t threshold_percent, uint16_t boost_percent, uint32_t boost_ms) {
-    if (threshold_percent > 100) threshold_percent = 100;
-    if (boost_percent > 100) boost_percent = 100;
-    g_start_threshold_percent = threshold_percent;
-    g_start_boost_percent = boost_percent;
-    g_start_boost_ms = boost_ms;
-}
-
-/**
- * @brief 获取当前起动助力参数
- */
-void Motor_GetStartBoostParams(uint16_t* threshold_percent, uint16_t* boost_percent, uint32_t* boost_ms) {
-    if (threshold_percent) *threshold_percent = g_start_threshold_percent;
-    if (boost_percent) *boost_percent = g_start_boost_percent;
-    if (boost_ms) *boost_ms = g_start_boost_ms;
-}

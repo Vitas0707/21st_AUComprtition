@@ -36,7 +36,7 @@ extern "C" {
  * @endcode
  */
 
-/** 电机定时器与通道（在 CubeMX/其他文件中定义对应的 htimX） */
+/** 电机定时器与通道 */
 #define M1_EN_TIM (&htim3)
 #define M1_EN_CHANNEL TIM_CHANNEL_1
 #define M1_Encoder_TIM (&htim5)
@@ -71,8 +71,6 @@ typedef struct {
 	float speed_m_s;               /**< 最近一次计算得到的速度（米/秒） */
 	float rpm;                     /**< 最近一次计算得到的电机轴 RPM */
 	uint32_t last_tick_ms;         /**< 上次更新时间（毫秒） */
-    uint16_t last_pwm_percent;     /**< 上次请求的 PWM 占空比（0..100） */
-    uint32_t boost_end_ms;         /**< 助力截止时间（HAL_GetTick 毫秒），0 表示未处于助力期 */
 	bool invert_direction;         /**< 若为 true，则对传入的方向取反（用于安装方向差异） */
 	struct {
 		float kp;                  /**< PID 比例系数 */
@@ -90,12 +88,6 @@ typedef struct {
 #define MG310_GEAR_RATIO 20.0f//减速比
 #define MG310_WHEEL_DIAMETER_M 0.048f//麦轮直径
 #define MG310_QUADRATURE_MULT 4.0f//倍频，实际每转脉冲数 = 线数 * 减速比 * 倍频
-
-/* 起动助力配置（可按需调整） */
-#define MOTOR_START_THRESHOLD_PERCENT 20U  /**< 若请求占空比低于此值且电机先前为停止，则触发短时助力 */
-#define MOTOR_START_BOOST_PERCENT 60U      /**< 助力期间使用的占空比（短时） */
-#define MOTOR_START_BOOST_MS 80U           /**< 助力持续时长（毫秒） */
-#define MIN_PWM_THRESHOLD 50.0f 			/**< 最小 PWM 阈值，低于此值可能无法克服静摩擦 */
 
 /** 底盘默认参数 */
 #define ROBOT_TRACK_WIDTH_M 0.166f//左右轮中心距离
