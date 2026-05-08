@@ -44,6 +44,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/Core/peripherals/OLED
     ${PROJECT_SOURCE_DIR}/Core/peripherals/Camera
     ${PROJECT_SOURCE_DIR}/Core/peripherals/Bluetooth
+    ${PROJECT_SOURCE_DIR}/Core/peripherals/Host
 
 
 )
@@ -56,6 +57,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/Core/peripherals/OLED/font.c
     ${PROJECT_SOURCE_DIR}/Core/peripherals/Camera/Camera.c
     ${PROJECT_SOURCE_DIR}/Core/peripherals/Bluetooth/Bluetooth.c
+    ${PROJECT_SOURCE_DIR}/Core/peripherals/Host/host.c
+
 
 )
 
@@ -66,6 +69,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     ${PROJECT_SOURCE_DIR}/Core/peripherals/OLED
     ${PROJECT_SOURCE_DIR}/Core/peripherals/Camera
     ${PROJECT_SOURCE_DIR}/Core/peripherals/Bluetooth
+    ${PROJECT_SOURCE_DIR}/Core/peripherals/Host
 
 )
 

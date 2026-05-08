@@ -31,6 +31,7 @@
 #include "Camera.h"
 #include "Bluetooth.h"
 #include <stdbool.h>
+#include "host.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -107,6 +108,7 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM5_Init();
   MX_TIM8_Init();
+  MX_UART4_Init();
   /* USER CODE BEGIN 2 */
   
   // 电机与底盘初始化
@@ -177,6 +179,13 @@ int main(void)
 
       OLED_ShowFrame();//一直显示在屏幕上，直到下一次更新
       Show_permission = 0;//显示完成
+    }
+
+    else if(Revolve_permission == 1){
+      for(int i = 0;i<Camera_Data.value;i++){
+        Robot_TurnAngleBlocking(&robot_drive, 360, 90.0f); // 自转 360 度，角速度 90 度/秒
+      }
+      Revolve_permission = 0;//转圈完成
     }
     
 
