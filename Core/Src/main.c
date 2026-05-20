@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "i2c.h"
+#include "stm32f4xx_hal_uart.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
@@ -52,9 +53,9 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-// cam_rx_byte is defined in Camera.c
-Motor_t wheelM1_fl, wheelM2_fr, wheelM3_rl, wheelM4_rr;
-RobotDrive_t robot_drive;
+Motor_t FL, FR, RL, RR;
+Car_t car;
+extern SetPID_t PID_Params;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -102,31 +103,22 @@ int main(void)
   MX_I2C2_Init();
   MX_TIM3_Init();
   MX_TIM4_Init();
-  MX_USART1_UART_Init();
   MX_USART2_UART_Init();
   MX_TIM1_Init();
-  MX_TIM2_Init();
   MX_TIM5_Init();
   MX_TIM8_Init();
   MX_UART4_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
-  
-  // 电机与底盘初始化
-  Motor_InitMG310Wheel(&wheelM1_fl, M1_EN_TIM, M1_EN_CHANNEL, GPIOB, GPIO_PIN_0, GPIO_PIN_1, M1_Encoder_TIM);
-  Motor_InitMG310Wheel(&wheelM2_fr, M2_EN_TIM, M2_EN_CHANNEL, GPIOC, GPIO_PIN_0, GPIO_PIN_1, M2_Encoder_TIM);
-  Motor_InitMG310Wheel(&wheelM3_rl, M3_EN_TIM, M3_EN_CHANNEL, GPIOD, GPIO_PIN_14, GPIO_PIN_15, M3_Encoder_TIM);
-  Motor_InitMG310Wheel(&wheelM4_rr, M4_EN_TIM, M4_EN_CHANNEL, GPIOD, GPIO_PIN_10, GPIO_PIN_11, M4_Encoder_TIM);
-  Motor_SetDirectionInverted(&wheelM1_fl, true);
-  Motor_SetDirectionInverted(&wheelM3_rl, true);
-  RobotDrive_Init(&robot_drive, &wheelM1_fl, &wheelM2_fr, &wheelM3_rl, &wheelM4_rr, ROBOT_TRACK_WIDTH_M, ROBOT_WHEEL_BASE_M);
-  //电机PID参数设置
-  // 左轮（前左和后左）设置较低的Kp以减速
-  Motor_PIDSetParams(&wheelM1_fl, 25.0f, 15.0f, 3.0f, 1000.0f, 100.0f);  // 降低Kp从35到25
-  Motor_PIDSetParams(&wheelM3_rl, 25.0f, 15.0f, 3.0f, 1000.0f, 100.0f);  // 降低Kp从35到25
-  // 右轮保持原参数
-  Motor_PIDSetParams(&wheelM2_fr, 35.0f, 15.0f, 3.0f, 1000.0f, 100.0f);
-  Motor_PIDSetParams(&wheelM4_rr, 35.0f, 15.0f, 3.0f, 1000.0f, 100.0f);
-
+  //电机初始化
+  Motor_WheelInit(&FL, &FL_TIM_HANDLE, FL_TIM_CHANNEL, FL_IN_PORT, FL_IN_PIN1, FL_IN_PIN2, &FL_ENCODER_TIM, WHEEL_DIAMETER_M, ENCODER_PPR, ENCODER_GEAR_RATIO);
+  Motor_WheelInit(&FR, &FR_TIM_HANDLE, FR_TIM_CHANNEL, FR_IN_PORT, FR_IN_PIN1, FR_IN_PIN2, &FR_ENCODER_TIM, WHEEL_DIAMETER_M, ENCODER_PPR, ENCODER_GEAR_RATIO);
+  Motor_WheelInit(&RL, &RL_TIM_HANDLE, RL_TIM_CHANNEL, RL_IN_PORT, RL_IN_PIN1, RL_IN_PIN2, &RL_ENCODER_TIM, WHEEL_DIAMETER_M, ENCODER_PPR, ENCODER_GEAR_RATIO);
+  Motor_WheelInit(&RR, &RR_TIM_HANDLE, RR_TIM_CHANNEL, RR_IN_PORT, RR_IN_PIN1, RR_IN_PIN2, &RR_ENCODER_TIM, WHEEL_DIAMETER_M, ENCODER_PPR, ENCODER_GEAR_RATIO);
+  Motor_SetDirectionInverted(&FL, true);
+  Motor_SetDirectionInverted(&RL, true);
+  Motor_SetDirectionInverted(&RR, true);
+  Car_Init(&car, &FL, &FR, &RL, &RR, TRACK_WIDTH_M);
   //OLED初始化
   HAL_Delay(20);
   OLED_Init();
@@ -134,14 +126,14 @@ int main(void)
   CAMERA_Init();
   //蓝牙初始化
   BLUETOOTH_Init();
+  //主机通信初始化
+  Host_Init();
 
+  Motor_PIDInit(&FL,4.27f, 2.94f, 9.43f, PID_OUTPUT_LIMIT);
+  Motor_PIDInit(&FR,2.62f, 1.59f, 0.00f, PID_OUTPUT_LIMIT);
+  Motor_PIDInit(&RL,4.27f, 2.94f, 9.43f, PID_OUTPUT_LIMIT);
+  Motor_PIDInit(&RR,2.62f, 1.59f, 0.00f, PID_OUTPUT_LIMIT);
 
-  // Motor_StartWheel(&wheelM1_fl, 60, 0); 
-  // Motor_RotateRevolutionsBlocking(&wheelM1_fl, 5, 2.0f);
-  // Motor_RotateRevolutionsBlocking(&wheelM2_fr, 5, 0.2F);
-  // Motor_RotateRevolutionsBlocking(&wheelM3_rl, 5, 0.2F);
-  // Motor_RotateRevolutionsBlocking(&wheelM4_rr, 5, 0.2F);
-  Robot_RotateWheelsRevolutionsBlocking(&robot_drive, 1, 2.0f);
 
   /* USER CODE END 2 */
 
@@ -149,47 +141,41 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    //OLED测试
-    // OLED_PrintString(1, 1, "动物", &font16x16, OLED_COLOR_NORMAL);
-    // OLED_ShowFrame();
+    Motor_ControlWheel(&FL, 0.50f);
+    Motor_ControlWheel(&FR, 0.50f);
+    Motor_ControlWheel(&RL, 0.50f);
+    Motor_ControlWheel(&RR, 0.50f);
+    // printf("para: %.2f,%.2f,%d,%.2f,%.2f\r\n", 0.50f,RR.speed_m_s,(int)RR.invert_direction,RR.pwm_duty,RR.pid.integral);
+    // Motor_PIDSetParams(&RR, PID_Params.Kp, PID_Params.Ki, PID_Params.Kd);
 
-    //电机测试：每个轮子转 5 圈，线速度 0.2 m/s
-
-    // HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
-    // HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
-    // __HAL_TIM_SET_COMPARE(M1_EN_TIM, TIM_CHANNEL_1, 100); 
-    // HAL_TIM_PWM_Start(M1_EN_TIM, M1_EN_CHANNEL);
-
-
-    if(Show_permission == 1){
+    // if(Show_permission == 1){
       
-      OLED_NewFrame();
+    //   OLED_NewFrame();
       
-      if (Camera_Data.str_index == 0) {
-        OLED_PrintString(1, 1, "动物", &font16x16, OLED_COLOR_NORMAL);
-        }else if (Camera_Data.str_index == 1) {
-        OLED_PrintString(1, 1, "人类", &font16x16, OLED_COLOR_NORMAL);
-        }else if (Camera_Data.str_index == 2) {
-        OLED_PrintString(1, 1, "水果", &font16x16, OLED_COLOR_NORMAL);
-        }else if (Camera_Data.str_index == 3) {
-        OLED_PrintString(1, 1, "枪械", &font16x16, OLED_COLOR_NORMAL);
-        }else {
-        OLED_PrintString(1, 1, "数据有误", &font16x16, OLED_COLOR_NORMAL);
-        }
+    //   if (Camera_Data.str_index == 0) {
+    //     OLED_PrintString(1, 1, "动物", &font16x16, OLED_COLOR_NORMAL);
+    //     }else if (Camera_Data.str_index == 1) {
+    //     OLED_PrintString(1, 1, "人类", &font16x16, OLED_COLOR_NORMAL);
+    //     }else if (Camera_Data.str_index == 2) {
+    //     OLED_PrintString(1, 1, "水果", &font16x16, OLED_COLOR_NORMAL);
+    //     }else if (Camera_Data.str_index == 3) {
+    //     OLED_PrintString(1, 1, "枪械", &font16x16, OLED_COLOR_NORMAL);
+    //     }else {
+    //     OLED_PrintString(1, 1, "数据有误", &font16x16, OLED_COLOR_NORMAL);
+    //     }
 
-      OLED_ShowFrame();//一直显示在屏幕上，直到下一次更新
-      Show_permission = 0;//显示完成
-    }
+    //   OLED_ShowFrame();
+    //   Show_permission = 0;//显示完成
+    // }
 
-    else if(Revolve_permission == 1){
-      for(int i = 0;i<Camera_Data.value;i++){
-        Robot_TurnAngleBlocking(&robot_drive, 360, 90.0f); // 自转 360 度，角速度 90 度/秒
-      }
-      Revolve_permission = 0;//转圈完成
-    }
+    // else if(Revolve_permission == 1){
+    //   for(int i = 0;i<Camera_Data.value;i++){
+    //   }
+    //   Revolve_permission = 0;//转圈完成
+    // }
     
 
-    HAL_Delay(10);//适当延时，避免过度占用CPU资源
+    HAL_Delay(10);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -250,20 +236,26 @@ void SystemClock_Config(void)
 
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
-  if (huart == BLUETOOTH_UART_HANDLE) {
+
+  if (huart == &BLUETOOTH_UART_HANDLE) {
     extern uint8_t Bluetooth_Rx_Buffer[BLUETOOTH_RX_BUFFER_SIZE]; // 蓝牙接收缓冲区
     if (Bluetooth_Rx_Buffer[0] == 'M' || Bluetooth_Rx_Buffer[0] == 'R' || Bluetooth_Rx_Buffer[0] == 'G') {
-      HAL_UART_Transmit_IT(CAMERA_UART_HANDLE, Bluetooth_Rx_Buffer, sizeof(Bluetooth_Rx_Buffer));
+      HAL_UART_Transmit_IT(&CAMERA_UART_HANDLE, Bluetooth_Rx_Buffer, sizeof(Bluetooth_Rx_Buffer));
     } else if (Bluetooth_Rx_Buffer[0] == 'B') {
       // 控制小车回去的逻辑（用户实现）
+      Revolve_permission = 1;
     }
-    HAL_UART_Receive_IT(BLUETOOTH_UART_HANDLE, Bluetooth_Rx_Buffer, sizeof(Bluetooth_Rx_Buffer));
+    HAL_UART_Receive_IT(&BLUETOOTH_UART_HANDLE, Bluetooth_Rx_Buffer, sizeof(Bluetooth_Rx_Buffer));
   }
-  else if (huart == CAMERA_UART_HANDLE) {
-    // 逐字节交给摄像头解析模块处理
+
+  else if (huart == &CAMERA_UART_HANDLE) {
     CAMERA_UART_Receive_Process(cam_rx_byte);
-    // 开启下一次接收
-    HAL_UART_Receive_IT(CAMERA_UART_HANDLE, &cam_rx_byte, 1);
+    HAL_UART_Receive_IT(&CAMERA_UART_HANDLE, &cam_rx_byte, 1);
+  }
+
+  else if(huart == &HOST_UART_HANDLE) {
+    Host_dataparser(Host_Rx_byte);
+    HAL_UART_Receive_IT(&HOST_UART_HANDLE, &Host_Rx_byte, 1);
   }
 }
 

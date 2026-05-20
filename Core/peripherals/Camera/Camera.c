@@ -1,4 +1,5 @@
 #include "Camera.h"
+#include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
@@ -17,9 +18,9 @@ CameraData_t Camera_Data;//储存识别和转圈数据
 uint8_t Step_Index = 0;//当前记录到了第几步
 uint8_t cam_rx_byte = 0;
     //单片机状态部分
-uint8_t Show_permission = 0;//是否允许显示屏显示内容
-uint8_t Move_permission = 0;//是否在移动
-uint8_t Revolve_permission = 0;//是否在转圈
+bool Show_permission = 0;//是否允许显示屏显示内容
+bool Move_permission = 0;//是否在移动
+bool Revolve_permission = 0;//是否在转圈
 
 // 简单方向解析（根据协议字符映射方向枚举值）
 static uint8_t Parse_Direction(char dir_char) {
@@ -37,7 +38,7 @@ static uint8_t Parse_Direction(char dir_char) {
   */
 void CAMERA_Init(void) {
     // 开启摄像头串口接收中断，准备接收数据
-    HAL_UART_Receive_IT(CAMERA_UART_HANDLE, &cam_rx_byte, 1);
+    HAL_UART_Receive_IT(&CAMERA_UART_HANDLE, &cam_rx_byte, 1);
     //0xFE和0xEF作为帧头和帧尾,防止数据流中的普通字符被误判为指令
 }
 
@@ -84,11 +85,11 @@ void CAMERA_UART_Receive_Process(uint8_t data) {
             }
             else if (Rx_DataType == 'R') {
                 Rx_TempBuf[Rx_Cnt - 1] = Camera_Data.str_index; 
-                Show_permission = 1;//允许显示屏显示内容
+                Show_permission = true;//允许显示屏显示内容
             } 
             else if (Rx_DataType == 'G') {
                 Rx_TempBuf[Rx_Cnt - 1] = Camera_Data.value;
-                Revolve_permission = 1;//允许转圈
+                Revolve_permission = true;//允许转圈
             }
             // 重置状态机
             Rx_State = 0;

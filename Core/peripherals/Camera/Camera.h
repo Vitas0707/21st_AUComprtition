@@ -2,6 +2,7 @@
 #define __CAMERA_H
 
 #include "stm32f4xx_hal.h" // 根据你的单片机型号修改，如 stm32f4xx_hal.h
+#include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
@@ -9,13 +10,13 @@
 #include "usart.h"
 
 // 定义使用的串口句柄
-#define CAMERA_UART_HANDLE (&huart1)
+#define CAMERA_UART_HANDLE huart4
 //定义步数存储长度
 #define MAX_STEPS 100
 //定义状态
-extern uint8_t Show_permission;//是否允许显示屏显示内容
-extern uint8_t Move_permission;//是否在移动
-extern uint8_t Revolve_permission;//是否在转圈
+extern bool Show_permission;//是否允许显示屏显示内容
+extern bool Move_permission;//是否在移动
+extern bool Revolve_permission;//是否在转圈
 
 // --- 解析后的数据结构 ---
 typedef struct {
@@ -39,7 +40,7 @@ extern CameraData_t Camera_Data;
 // 用于串口单字节接收的缓冲（在 Camera.c 中定义）
 extern uint8_t cam_rx_byte;
 // 显示许可标志（在 Camera.c 中定义）
-extern uint8_t Show_permission;
+extern bool Show_permission;
 
 // --- 函数声明 ---
 void CAMERA_Init(void);

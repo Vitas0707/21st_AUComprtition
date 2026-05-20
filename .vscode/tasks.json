@@ -1,0 +1,32 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Flash (STM32CubeProgrammer CLI)",
+            "type": "shell",
+            "command": "C:\\Program Files\\STMicroelectronics\\STM32Cube\\STM32CubeProgrammer\\bin\\STM32_Programmer_CLI.exe",
+            "args": [
+                "-c",
+                "port=SWD",
+                "-w",
+                "${workspaceFolder}/build/Debug/AU.bin",
+                "0x08000000",
+                "-v"
+            ],
+            "presentation": { "echo": true, "reveal": "always" },
+            "problemMatcher": []
+        },
+        {
+            "label": "Flash (st-flash)",
+            "type": "shell",
+            "command": "st-flash",
+            "args": [
+                "write",
+                "${workspaceFolder}/build/Debug/AU.bin",
+                "0x8000000"
+            ],
+            "presentation": { "echo": true, "reveal": "always" },
+            "problemMatcher": []
+        }
+    ]
+}
