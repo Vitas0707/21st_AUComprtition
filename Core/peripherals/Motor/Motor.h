@@ -14,7 +14,7 @@ extern "C" {
 #define FREQUENCY_MULT 4
 #define ENCODER_CPR (ENCODER_PPR * ENCODER_GEAR_RATIO * FREQUENCY_MULT)
 #define WHEEL_DIAMETER_M 0.048f
-#define TRACK_WIDTH_M 0.19f
+#define TRACK_WIDTH_M 0.165f
 
 
 /* 电机控制通道和对应编码器通道 */
@@ -47,7 +47,8 @@ extern "C" {
 #define RR_ENCODER_TIM htim8
 
 
-#define MIN_PWM_THRESHOLD 60U
+#define MIN_PWM_THRESHOLD 50U
+#define MAX_PWM_THRESHOLD 65U
 #define FEED_FORWARD_PWM 50U
 #define DEFAULT_KP 30.0f
 #define DEFAULT_KI 1.0f
@@ -55,6 +56,8 @@ extern "C" {
 #define DEFAULT_ERROR_LPF_ALPHA 0.1f
 #define PID_OUTPUT_LIMIT 100.0f
 #define PID_CONTROL_PERIOD_MS 10U
+#define POS_KP 2.0f
+#define POS_KD 0.5f
 
 typedef struct {
     TIM_HandleTypeDef* htim_pwm;
@@ -73,7 +76,6 @@ typedef struct {
     uint32_t last_tick_ms;       /* 编码器更新时间戳（ms） */
     uint32_t pid_last_tick_ms;   /* 上次 PID 控制时间戳（ms） */
     bool invert_direction;
-    float pwm_duty;
     struct {
         float kp;
         float ki;
@@ -83,7 +85,6 @@ typedef struct {
         float integral;
         float output;
         float output_limit;
-        float filtered_error;
         float lpf_alpha;
     } pid;
 } Motor_t;
@@ -94,7 +95,21 @@ typedef struct {
     Motor_t* rl;
     Motor_t* rr;
     float track_width_m;
+    float pos_prev_error;
+    float lpf_alpha;
 } Car_t;
+
+
+typedef enum {
+    CAR_DIR_FORWARD = 0,
+    CAR_DIR_BACKWARD,
+    CAR_DIR_LEFT,
+    CAR_DIR_RIGHT,
+    CAR_DIR_CW,//顺时针
+    CAR_DIR_CCW,//逆时针
+} CarDir_t;
+
+
 
 
 void Motor_WheelInit(Motor_t* m,
@@ -120,7 +135,10 @@ float Motor_PIDIncrementalUpdate(Motor_t* m, float target_speed_m_s,float dt_s);
 
 void Motor_ControlWheel(Motor_t* m, float target_speed_m_s) ;
 
-int Car_RotateBlocking(Car_t* r, float angle_deg, float angular_speed_deg_s);
+int Car_DriveDistance(Car_t* car, CarDir_t dir, float distance_m);
+int Car_StrafeDistance(Car_t* car, CarDir_t dir, float distance_m, float speed_m_s);
+int Car_RotateAngle(Car_t* car, CarDir_t dir, float angle_deg) ;
+
 
 #ifdef __cplusplus
 }
