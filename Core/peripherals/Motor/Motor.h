@@ -56,8 +56,8 @@ extern "C" {
 #define DEFAULT_ERROR_LPF_ALPHA 0.1f
 #define PID_OUTPUT_LIMIT 100.0f
 #define PID_CONTROL_PERIOD_MS 10U
-#define POS_KP 2.0f
-#define POS_KD 0.5f
+#define POS_KP 0.5f
+#define POS_KD 0.01f
 
 typedef struct {
     TIM_HandleTypeDef* htim_pwm;

@@ -296,7 +296,7 @@ int Car_DriveDistance(Car_t* car, CarDir_t dir, float distance_m) {
 
         float pos_raw_error = (float)(target_counts - current_counts);
         float pos_error = car->lpf_alpha * pos_raw_error + (1.0f - car->lpf_alpha) * car->pos_prev_error;
-        float pos_out = POS_KP * pos_error + POS_KD * ((pos_error - car->pos_prev_error)/((float)period_ms/1000.0f));
+        float pos_out = POS_KP * pos_error + POS_KD * ((pos_error - car->pos_prev_error)/(float)period_ms);
         float wheel_speed = (dir == CAR_DIR_FORWARD) ? pos_out : -pos_out ;
         car->pos_prev_error = pos_error;
 
@@ -312,11 +312,11 @@ int Car_DriveDistance(Car_t* car, CarDir_t dir, float distance_m) {
         Motor_UpdateEncoder(car->rl);
         Motor_UpdateEncoder(car->rr);
 
-        bool reached = 1;
-        d0 = car->fl->total_counts - start_counts[0]; if (d0 < 0) d0 = -d0; if (d0 < target_counts) reached = 0;
-        d1 = car->fr->total_counts - start_counts[1]; if (d1 < 0) d1 = -d1; if (d1 < target_counts) reached = 0;
-        d2 = car->rl->total_counts - start_counts[2]; if (d2 < 0) d2 = -d2; if (d2 < target_counts) reached = 0;
-        d3 = car->rr->total_counts - start_counts[3]; if (d3 < 0) d3 = -d3; if (d3 < target_counts) reached = 0;
+        bool reached = false;
+        d0 = car->fl->total_counts - start_counts[0]; if (d0 < 0) d0 = -d0; if (d0 >= target_counts-5) reached = true;
+        d1 = car->fr->total_counts - start_counts[1]; if (d1 < 0) d1 = -d1; if (d1 >= target_counts-5) reached = true;
+        d2 = car->rl->total_counts - start_counts[2]; if (d2 < 0) d2 = -d2; if (d2 >= target_counts-5) reached = true;
+        d3 = car->rr->total_counts - start_counts[3]; if (d3 < 0) d3 = -d3; if (d3 >= target_counts-5) reached = true;
 
         if (reached) {
             Car_StopAllWheels(car);
@@ -389,11 +389,11 @@ int Car_StrafeDistance(Car_t* car, CarDir_t dir, float distance_m, float speed_m
         Motor_ControlWheel(car->rl, wheel_speed_rl);
         Motor_ControlWheel(car->rr, wheel_speed_rr);
 
-        int reached = 1;
-        int64_t d0 = car->fl->total_counts - start_counts[0]; if (d0 < 0) d0 = -d0; if (d0 < target_counts) reached = 0;
-        int64_t d1 = car->fr->total_counts - start_counts[1]; if (d1 < 0) d1 = -d1; if (d1 < target_counts) reached = 0;
-        int64_t d2 = car->rl->total_counts - start_counts[2]; if (d2 < 0) d2 = -d2; if (d2 < target_counts) reached = 0;
-        int64_t d3 = car->rr->total_counts - start_counts[3]; if (d3 < 0) d3 = -d3; if (d3 < target_counts) reached = 0;
+        bool reached = false;
+        int64_t d0 = car->fl->total_counts - start_counts[0]; if (d0 < 0) d0 = -d0; if (d0 >= target_counts-5) reached = true;
+        int64_t d1 = car->fr->total_counts - start_counts[1]; if (d1 < 0) d1 = -d1; if (d1 >= target_counts-5) reached = true;
+        int64_t d2 = car->rl->total_counts - start_counts[2]; if (d2 < 0) d2 = -d2; if (d2 >= target_counts-5) reached = true;
+        int64_t d3 = car->rr->total_counts - start_counts[3]; if (d3 < 0) d3 = -d3; if (d3 >= target_counts-5) reached = true;
 
         if (reached) {
             Car_StopAllWheels(car);
@@ -441,7 +441,6 @@ int Car_RotateAngle(Car_t* car, CarDir_t dir, float angle_deg) {
     start_counts[3] = car->rr->total_counts;
 
     uint32_t start_ms = HAL_GetTick();
-    const uint32_t period_ms = PID_CONTROL_PERIOD_MS;
 
     for (;;) {
         int64_t dl0 = car->fl->total_counts - start_counts[0]; if (dl0 < 0) dl0 = -dl0;
@@ -450,10 +449,9 @@ int Car_RotateAngle(Car_t* car, CarDir_t dir, float angle_deg) {
         int64_t dr3 = car->rr->total_counts - start_counts[3]; if (dr3 < 0) dr3 = -dr3;
         int64_t d_avg = (dl0 + dl2 + dr1 + dr3) / 4;
 
-        /* position PID*/
         float pos_raw_error = (float)(target_counts - d_avg);
         float pos_error = car->lpf_alpha * pos_raw_error + (1.0f - car->lpf_alpha) * car->pos_prev_error;
-        float pos_out = POS_KP * pos_error + POS_KD * ((pos_error - car->pos_prev_error)/((float)period_ms/1000.0f));
+        float pos_out = POS_KP * pos_error + POS_KD * ((pos_error - car->pos_prev_error)/(float)PID_CONTROL_PERIOD_MS);
         car->pos_prev_error = pos_error;
 
         float left_speed = -pos_out;
@@ -467,7 +465,7 @@ int Car_RotateAngle(Car_t* car, CarDir_t dir, float angle_deg) {
         Motor_ControlWheel(car->rl, left_speed);
         Motor_ControlWheel(car->fr, right_speed);
         Motor_ControlWheel(car->rr, right_speed);
-        HAL_Delay(period_ms);
+        HAL_Delay(PID_CONTROL_PERIOD_MS);
 
         Motor_UpdateEncoder(car->fl);
         Motor_UpdateEncoder(car->fr);

@@ -138,11 +138,15 @@ int main(void)
   Motor_PIDInit(&FR, 4.27f, 2.94f, 9.43f, PID_OUTPUT_LIMIT);
   Motor_PIDInit(&RR,4.27f, 2.94f, 9.43f, PID_OUTPUT_LIMIT);
 
-  Car_DriveDistance(&car, CAR_DIR_FORWARD, 0.30f);
-  Car_RotateAngle(&car, CAR_DIR_CCW, 90);
-  Car_DriveDistance(&car, CAR_DIR_FORWARD, 0.30f);
-  Car_RotateAngle(&car, CAR_DIR_CCW, 90);
-  Car_DriveDistance(&car, CAR_DIR_FORWARD, 0.30f);
+  // Car_DriveDistance(&car, CAR_DIR_FORWARD, 0.30f);
+  // Car_RotateAngle(&car, CAR_DIR_CCW, 90);
+  // Car_DriveDistance(&car, CAR_DIR_FORWARD, 0.30f);
+  // Car_RotateAngle(&car, CAR_DIR_CCW, 90);
+  // Car_DriveDistance(&car, CAR_DIR_FORWARD, 0.30f);
+  // Car_RotateAngle(&car, CAR_DIR_CCW, 90);
+  // Car_DriveDistance(&car, CAR_DIR_FORWARD, 0.30f);
+  // Car_StrafeDistance(&car, CAR_DIR_LEFT, 0.30f, 0.25f);
+  // Car_StrafeDistance(&car, CAR_DIR_RIGHT, 0.30f, 0.25f);
 
   /* USER CODE END 2 */
 
