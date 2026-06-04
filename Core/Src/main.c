@@ -21,6 +21,8 @@
 #include "dma.h"
 #include "i2c.h"
 #include "stm32f4xx_hal.h"
+#include "stm32f4xx_hal_def.h"
+#include "stm32f4xx_hal_uart.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
@@ -33,6 +35,7 @@
 #include "Camera.h"
 #include "Bluetooth.h"
 #include <stdbool.h>
+#include <stdint.h>
 #include "host.h"
 /* USER CODE END Includes */
 
@@ -56,6 +59,8 @@
 /* USER CODE BEGIN PV */
 Motor_t FL, FR, RL, RR;
 Car_t car;
+char cmd[1] = {'1'};
+char check[] ="接收成功";
 // extern SetPID_t PID_Params;
 /* USER CODE END PV */
 
@@ -138,15 +143,11 @@ int main(void)
   Motor_PIDInit(&FR, 4.27f, 2.94f, 9.43f, PID_OUTPUT_LIMIT);
   Motor_PIDInit(&RR,4.27f, 2.94f, 9.43f, PID_OUTPUT_LIMIT);
 
+
   // Car_DriveDistance(&car, CAR_DIR_FORWARD, 0.30f);
-  // Car_RotateAngle(&car, CAR_DIR_CCW, 90);
-  // Car_DriveDistance(&car, CAR_DIR_FORWARD, 0.30f);
-  // Car_RotateAngle(&car, CAR_DIR_CCW, 90);
-  // Car_DriveDistance(&car, CAR_DIR_FORWARD, 0.30f);
-  // Car_RotateAngle(&car, CAR_DIR_CCW, 90);
-  // Car_DriveDistance(&car, CAR_DIR_FORWARD, 0.30f);
-  // Car_StrafeDistance(&car, CAR_DIR_LEFT, 0.30f, 0.25f);
-  // Car_StrafeDistance(&car, CAR_DIR_RIGHT, 0.30f, 0.25f);
+  // Car_RotateAngle(&car, CAR_DIR_CCW, 95);
+  // Car_DriveDistance(&car, CAR_DIR_FORWARD, 0.90f);
+  // Car_DriveDistance(&car, CAR_DIR_BACKWARD, 0.01f);
 
   /* USER CODE END 2 */
 
@@ -161,24 +162,32 @@ int main(void)
     // printf("para:%.2f,%.2f,%.2f,%.2f\r\n", FL.speed_m_s, FR.speed_m_s, RL.speed_m_s, RR.speed_m_s);
     // printf("para: %.2f,%.2f,%d,%.2f,%.2f\r\n", 0.50f,RR.speed_m_s,(int)RR.invert_direction,RR.pwm_duty,RR.pid.integral);
     // Motor_PIDSetParams(&RR, PID_Params.Kp, PID_Params.Ki, PID_Params.Kd);
+
+    /*  去程  */
     if(Move_permission == true){
       Car_DriveDistance(&car, CAR_DIR_FORWARD, 0.3f);
       switch(Steps[Step_Index].direction){
         case 1:{//直行
           Car_DriveDistance(&car, CAR_DIR_FORWARD, 0.30f);
           Car_DriveDistance(&car, CAR_DIR_FORWARD, (Steps[Step_Index].steps-1)*0.3f);
+          Car_DriveDistance(&car, CAR_DIR_BACKWARD, 0.01f);
+          HAL_UART_Transmit(&CAMERA_UART_HANDLE, (uint8_t*)&cmd, sizeof(cmd), HAL_MAX_DELAY);
           break;
         }
         case 2:{//右转
           Car_DriveDistance(&car, CAR_DIR_FORWARD, 0.30f);
-          Car_RotateAngle(&car, CAR_DIR_CW, 90);
+          Car_RotateAngle(&car, CAR_DIR_CW, 100);
           Car_DriveDistance(&car, CAR_DIR_FORWARD,(Steps[Step_Index].steps-1)*0.3f);
+          Car_DriveDistance(&car, CAR_DIR_BACKWARD, 0.01f);
+          HAL_UART_Transmit(&CAMERA_UART_HANDLE, (uint8_t*)&cmd, sizeof(cmd), HAL_MAX_DELAY);
           break;
         }
         case 3:{//左转
           Car_DriveDistance(&car, CAR_DIR_FORWARD, 0.30f);
-          Car_RotateAngle(&car, CAR_DIR_CCW, 90);
+          Car_RotateAngle(&car, CAR_DIR_CCW, 100);
           Car_DriveDistance(&car, CAR_DIR_FORWARD, (Steps[Step_Index].steps-1)*0.3f);
+          Car_DriveDistance(&car, CAR_DIR_BACKWARD, 0.01f);
+          HAL_UART_Transmit(&CAMERA_UART_HANDLE, (uint8_t*)&cmd, sizeof(cmd), HAL_MAX_DELAY);
           break;
         }
         case 4:{//到达终点
@@ -187,37 +196,35 @@ int main(void)
         }
         default:break;
       }
+      Move_permission = false;
     }
-
+    /*  显示内容   */
     else if(Show_permission == true){
       OLED_NewFrame();
-      if (Camera_Data.str_index == 0) {
+      if (Camera_Data.str_index == '0') {
       OLED_PrintString(1, 1, "动物", &font16x16, OLED_COLOR_NORMAL);
-      }else if (Camera_Data.str_index == 1) {
+      }else if (Camera_Data.str_index == '1') {
       OLED_PrintString(1, 1, "人类", &font16x16, OLED_COLOR_NORMAL);
-      }else if (Camera_Data.str_index == 2) {
+      }else if (Camera_Data.str_index == '2') {
       OLED_PrintString(1, 1, "水果", &font16x16, OLED_COLOR_NORMAL);
-      }else if (Camera_Data.str_index == 3) {
-      OLED_PrintString(1, 1, "枪械", &font16x16, OLED_COLOR_NORMAL);
-      }else {
+      }
+      else {
       OLED_PrintString(1, 1, "数据有误", &font16x16, OLED_COLOR_NORMAL);
       }
       OLED_ShowFrame();
       Show_permission = false;//显示完成
     }
-
+    /*  转圈   */
     else if(Revolve_permission == true){
       for(int i = 0;i<Camera_Data.value;i++){
-        Car_RotateAngle(&car, CAR_DIR_CCW, 360);
+        Car_RotateAngle(&car, CAR_DIR_CCW, 370);
         HAL_Delay(300);
       }
       Revolve_permission = false;//转圈完成
     }
-    
+    /*  回退   */
     else if(Back_permission == true){
-
-      if(Step_Index == 4) Step_Index --;
-      switch(Steps[Step_Index--].direction){
+      switch(Steps[Step_Index].direction){
         case 1:{//直行
           Car_DriveDistance(&car, CAR_DIR_FORWARD, Steps[Step_Index].steps*0.3f);
           break;
@@ -234,7 +241,10 @@ int main(void)
         }
         default:break;
       }
-      Back_permission = false;//回退完成
+      if(Step_Index == 0){
+        Back_permission = false;//回退完成
+      }
+      Step_Index--;
     }
 
     HAL_Delay(10);
@@ -299,10 +309,12 @@ void SystemClock_Config(void)
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
 
   if (huart == &BLUETOOTH_UART_HANDLE) {
-    if (Bluetooth_Rx_Buffer[0] == 'M' || Bluetooth_Rx_Buffer[0] == 'R' || Bluetooth_Rx_Buffer[0] == 'G') {
-      HAL_UART_Transmit_IT(&CAMERA_UART_HANDLE, Bluetooth_Rx_Buffer, sizeof(Bluetooth_Rx_Buffer));
+    if (Bluetooth_Rx_Buffer[0] == 'M') {
+      HAL_UART_Transmit_IT(&CAMERA_UART_HANDLE, (uint8_t*)&cmd, sizeof(cmd));
+      HAL_UART_Transmit(&BLUETOOTH_UART_HANDLE, (uint8_t*)check, sizeof(check), HAL_MAX_DELAY);
     } else if (Bluetooth_Rx_Buffer[0] == 'B') {
       Back_permission = true;
+      HAL_UART_Transmit(&BLUETOOTH_UART_HANDLE, (uint8_t*)check, sizeof(check), HAL_MAX_DELAY);
     }
     HAL_UART_Receive_IT(&BLUETOOTH_UART_HANDLE, Bluetooth_Rx_Buffer, sizeof(Bluetooth_Rx_Buffer));
   }

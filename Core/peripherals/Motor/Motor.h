@@ -50,14 +50,14 @@ extern "C" {
 #define MIN_PWM_THRESHOLD 50U
 #define MAX_PWM_THRESHOLD 65U
 #define FEED_FORWARD_PWM 50U
-#define DEFAULT_KP 30.0f
-#define DEFAULT_KI 1.0f
-#define DEFAULT_KD 0.0f
+#define DEFAULT_KP 5.0f
+#define DEFAULT_KI 3.0f
+#define DEFAULT_KD 10.0f
 #define DEFAULT_ERROR_LPF_ALPHA 0.1f
 #define PID_OUTPUT_LIMIT 100.0f
 #define PID_CONTROL_PERIOD_MS 10U
-#define POS_KP 0.5f
-#define POS_KD 0.01f
+#define POS_KP 1.0f
+#define POS_KD 0.1f
 
 typedef struct {
     TIM_HandleTypeDef* htim_pwm;

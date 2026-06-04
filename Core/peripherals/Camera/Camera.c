@@ -1,4 +1,7 @@
 #include "Camera.h"
+#include "Bluetooth.h"
+#include "stm32f4xx_hal_uart.h"
+#include <stdint.h>
 
 
 // 状态机：0 = 等待帧头(0xFE), 1 = 收到类型字节, 2 = 接收数据直到帧尾(0xEF)
@@ -6,6 +9,7 @@ static uint8_t Rx_State = 0;
 static uint8_t Rx_DataType = 0;
 static uint8_t Rx_TempBuf[32];
 static uint8_t Rx_Cnt = 0;
+static char check[] ="摄像头已发送";
 
 // 对外存储
 step_t Steps[MAX_STEPS];
@@ -17,6 +21,8 @@ bool Show_permission = false;
 bool Move_permission = false;
 bool Revolve_permission = false;
 bool Back_permission = false;
+
+
 
 static uint8_t Parse_Direction(char dir_char) {
     switch (dir_char) {
@@ -37,11 +43,11 @@ void CAMERA_Init(void) {
   * @brief 串口逐字节处理入口（在 HAL_UART_RxCpltCallback 中调用）
   * @param data 收到的单字节
   *
-  * 协议：0xFE [type] [data...] 0xEF
+  * 协议： <[type][data...]>
   */
 void CAMERA_UART_Receive_Process(uint8_t data) {
     if (Rx_State == 0) {
-        if (data == 0xFE) {
+        if (data == '<') {
             Rx_State = 1;
             Rx_Cnt = 0;
             Rx_DataType = 0;
@@ -58,7 +64,7 @@ void CAMERA_UART_Receive_Process(uint8_t data) {
     }
 
     else if (Rx_State == 2) {
-        if (data == 0xEF) {
+        if (data == '>') {
             // 帧尾：根据类型解析已接收的 payload（Rx_TempBuf[0..Rx_Cnt-1]）
             if (Rx_DataType == 'M') {
                 char dir_char = (char)Rx_TempBuf[0];
@@ -68,16 +74,20 @@ void CAMERA_UART_Receive_Process(uint8_t data) {
                 s.direction = dir;
                 s.steps = (uint8_t)Rx_TempBuf[1];
                 if (Step_Index < MAX_STEPS) {
-                    Steps[Step_Index++] = s;
+                    Steps[Step_Index] = s;
+                    Move_permission = true;//允许小车移动
+                    HAL_UART_Transmit(&BLUETOOTH_UART_HANDLE, (uint8_t*)check, sizeof(check), HAL_MAX_DELAY);
                 }
             }
             else if (Rx_DataType == 'R') {
-                Rx_TempBuf[Rx_Cnt - 1] = Camera_Data.str_index; 
+                Camera_Data.str_index = Rx_TempBuf[Rx_Cnt - 1] ; 
                 Show_permission = true;//允许显示屏显示内容
+                HAL_UART_Transmit(&BLUETOOTH_UART_HANDLE, (uint8_t*)check, sizeof(check), HAL_MAX_DELAY);
             } 
             else if (Rx_DataType == 'G') {
-                Rx_TempBuf[Rx_Cnt - 1] = Camera_Data.value;
+                Camera_Data.value = Rx_TempBuf[Rx_Cnt - 1] ;
                 Revolve_permission = true;//允许转圈
+                HAL_UART_Transmit(&BLUETOOTH_UART_HANDLE, (uint8_t*)check, sizeof(check), HAL_MAX_DELAY);
             }
             // 重置状态机
             Rx_State = 0;
