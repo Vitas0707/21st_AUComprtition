@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include "usart.h"
 
-#define CAMERA_UART_HANDLE huart4
+#define CAMERA_UART_HANDLE huart2
 #define MAX_STEPS 100
 
 typedef struct {

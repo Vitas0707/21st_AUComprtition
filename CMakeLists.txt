@@ -89,4 +89,6 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
 )
 
 #启用 printf 的浮点数支持
-target_link_options(${CMAKE_PROJECT_NAME} PRIVATE -u _printf_float)
+target_link_options(${CMAKE_PROJECT_NAME} PRIVATE 
+    -u _printf_float
+)

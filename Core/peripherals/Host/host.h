@@ -34,9 +34,7 @@ extern uint8_t Host_Rx_Buffer[32];
 extern uint8_t Host_Rx_Index;
 extern SetPID_t PID_Params;
 
-
-int _write(int file, char *ptr, int len);
-
+void send_justfloat(float var1,float var2,float var3,float var4);
 void Host_Init() ;
 void Host_dataparser(uint8_t data);
 

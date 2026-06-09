@@ -2,6 +2,7 @@
 #include "Bluetooth.h"
 #include "stm32f4xx_hal_uart.h"
 #include <stdint.h>
+#include <stdio.h>
 
 
 // 状态机：0 = 等待帧头(0xFE), 1 = 收到类型字节, 2 = 接收数据直到帧尾(0xEF)
@@ -9,7 +10,7 @@ static uint8_t Rx_State = 0;
 static uint8_t Rx_DataType = 0;
 static uint8_t Rx_TempBuf[32];
 static uint8_t Rx_Cnt = 0;
-static char check[] ="摄像头已发送";
+static char check[64];
 
 // 对外存储
 step_t Steps[MAX_STEPS];
@@ -30,6 +31,8 @@ static uint8_t Parse_Direction(char dir_char) {
         case 'R': case 'r': return 2; // right
         case 'L': case 'l': return 3; // left
         case 'O': case 'o': return 4; // over
+        case 'A': case 'a': return 5; // strafe right
+        case 'B': case 'b': return 6; //strafe left
         default: return 0;           // invalid
     }
 }
@@ -72,22 +75,25 @@ void CAMERA_UART_Receive_Process(uint8_t data) {
                 
                 step_t s;
                 s.direction = dir;
-                s.steps = (uint8_t)Rx_TempBuf[1];
+                s.steps = (uint8_t)Rx_TempBuf[1] - '0';
                 if (Step_Index < MAX_STEPS) {
                     Steps[Step_Index] = s;
                     Move_permission = true;//允许小车移动
-                    HAL_UART_Transmit(&BLUETOOTH_UART_HANDLE, (uint8_t*)check, sizeof(check), HAL_MAX_DELAY);
+                    int data_len = snprintf(check, sizeof(check), "M: %c,%d", dir_char, s.steps);
+                    HAL_UART_Transmit(&BLUETOOTH_UART_HANDLE, (uint8_t*)check, data_len, HAL_MAX_DELAY);
                 }
             }
             else if (Rx_DataType == 'R') {
                 Camera_Data.str_index = Rx_TempBuf[Rx_Cnt - 1] ; 
                 Show_permission = true;//允许显示屏显示内容
-                HAL_UART_Transmit(&BLUETOOTH_UART_HANDLE, (uint8_t*)check, sizeof(check), HAL_MAX_DELAY);
+                int data_len = snprintf(check, sizeof(check), "R: %c", Camera_Data.str_index);
+                HAL_UART_Transmit(&BLUETOOTH_UART_HANDLE, (uint8_t*)check, data_len, HAL_MAX_DELAY);
             } 
             else if (Rx_DataType == 'G') {
-                Camera_Data.value = Rx_TempBuf[Rx_Cnt - 1] ;
+                Camera_Data.value = Rx_TempBuf[Rx_Cnt - 1] - '0';
                 Revolve_permission = true;//允许转圈
-                HAL_UART_Transmit(&BLUETOOTH_UART_HANDLE, (uint8_t*)check, sizeof(check), HAL_MAX_DELAY);
+                int data_len = snprintf(check, sizeof(check), "G: %d", Camera_Data.value);
+                HAL_UART_Transmit(&BLUETOOTH_UART_HANDLE, (uint8_t*)check, data_len, HAL_MAX_DELAY);
             }
             // 重置状态机
             Rx_State = 0;

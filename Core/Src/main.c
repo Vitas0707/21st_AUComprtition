@@ -20,9 +20,6 @@
 #include "main.h"
 #include "dma.h"
 #include "i2c.h"
-#include "stm32f4xx_hal.h"
-#include "stm32f4xx_hal_def.h"
-#include "stm32f4xx_hal_uart.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
@@ -46,7 +43,9 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define ONE_GRID_M 0.30f
+#define QUARTER_DEGREE 125
+#define ONE_CIRCLE 500
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -59,8 +58,9 @@
 /* USER CODE BEGIN PV */
 Motor_t FL, FR, RL, RR;
 Car_t car;
-char cmd[1] = {'1'};
-char check[] ="接收成功";
+char cmd[1] ={  '1'};
+char stop[1] = {'0'};
+char check[] ="Received";
 // extern SetPID_t PID_Params;
 /* USER CODE END PV */
 
@@ -72,8 +72,11 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
-
+int _write(int file, char *ptr, int len)
+{
+    HAL_UART_Transmit(&BLUETOOTH_UART_HANDLE, (uint8_t *)ptr, len, HAL_MAX_DELAY);
+    return len;
+}
 /* USER CODE END 0 */
 
 /**
@@ -136,12 +139,10 @@ int main(void)
   //主机通信初始化
   Host_Init();
 
-  Motor_PIDInit(&FL,4.27f, 2.94f, 9.43f, PID_OUTPUT_LIMIT);
-  // Motor_PIDInit(&FR,2.62f, 1.59f, 0.00f, PID_OUTPUT_LIMIT);
-  Motor_PIDInit(&RL,4.27f, 2.94f, 9.43f, PID_OUTPUT_LIMIT);
-  // Motor_PIDInit(&RR,2.62f, 1.59f, 0.00f, PID_OUTPUT_LIMIT);
-  Motor_PIDInit(&FR, 4.27f, 2.94f, 9.43f, PID_OUTPUT_LIMIT);
-  Motor_PIDInit(&RR,4.27f, 2.94f, 9.43f, PID_OUTPUT_LIMIT);
+  Motor_PIDInit(&FL,4.71f, 2.94f, 2.67f, PID_OUTPUT_LIMIT);
+  Motor_PIDInit(&RL,4.71f, 2.94f, 2.67f, PID_OUTPUT_LIMIT);
+  Motor_PIDInit(&FR, 4.71f, 2.94f, 2.67f, PID_OUTPUT_LIMIT);
+  Motor_PIDInit(&RR,4.71f, 2.94f, 2.67f, PID_OUTPUT_LIMIT);
 
 
   // Car_DriveDistance(&car, CAR_DIR_FORWARD, 0.30f);
@@ -165,33 +166,55 @@ int main(void)
 
     /*  去程  */
     if(Move_permission == true){
-      Car_DriveDistance(&car, CAR_DIR_FORWARD, 0.3f);
       switch(Steps[Step_Index].direction){
         case 1:{//直行
-          Car_DriveDistance(&car, CAR_DIR_FORWARD, 0.30f);
-          Car_DriveDistance(&car, CAR_DIR_FORWARD, (Steps[Step_Index].steps-1)*0.3f);
-          Car_DriveDistance(&car, CAR_DIR_BACKWARD, 0.01f);
+          Car_DriveDistance(&car, CAR_DIR_FORWARD, ONE_GRID_M);
+          for(int i = 0;i<Steps[Step_Index].steps-1;i++){
+            Car_DriveDistance(&car, CAR_DIR_FORWARD, ONE_GRID_M);
+          }
+          Step_Index++;
           HAL_UART_Transmit(&CAMERA_UART_HANDLE, (uint8_t*)&cmd, sizeof(cmd), HAL_MAX_DELAY);
           break;
         }
         case 2:{//右转
-          Car_DriveDistance(&car, CAR_DIR_FORWARD, 0.30f);
-          Car_RotateAngle(&car, CAR_DIR_CW, 100);
-          Car_DriveDistance(&car, CAR_DIR_FORWARD,(Steps[Step_Index].steps-1)*0.3f);
-          Car_DriveDistance(&car, CAR_DIR_BACKWARD, 0.01f);
+          Car_DriveDistance(&car, CAR_DIR_FORWARD, ONE_GRID_M);
+          Car_RotateAngle(&car, CAR_DIR_CW, QUARTER_DEGREE);
+          for(int i = 0;i<Steps[Step_Index].steps-1;i++){
+            Car_DriveDistance(&car, CAR_DIR_FORWARD, ONE_GRID_M);
+          }
+          Step_Index++;
           HAL_UART_Transmit(&CAMERA_UART_HANDLE, (uint8_t*)&cmd, sizeof(cmd), HAL_MAX_DELAY);
           break;
         }
         case 3:{//左转
-          Car_DriveDistance(&car, CAR_DIR_FORWARD, 0.30f);
-          Car_RotateAngle(&car, CAR_DIR_CCW, 100);
-          Car_DriveDistance(&car, CAR_DIR_FORWARD, (Steps[Step_Index].steps-1)*0.3f);
-          Car_DriveDistance(&car, CAR_DIR_BACKWARD, 0.01f);
+          Car_DriveDistance(&car, CAR_DIR_FORWARD, ONE_GRID_M);
+          Car_RotateAngle(&car, CAR_DIR_CCW, QUARTER_DEGREE);
+          for(int i = 0;i<Steps[Step_Index].steps-1;i++){
+            Car_DriveDistance(&car, CAR_DIR_FORWARD, ONE_GRID_M);
+          }
+          Step_Index++;
           HAL_UART_Transmit(&CAMERA_UART_HANDLE, (uint8_t*)&cmd, sizeof(cmd), HAL_MAX_DELAY);
           break;
         }
         case 4:{//到达终点
-          Car_DriveDistance(&car, CAR_DIR_FORWARD, 0.30f);
+          Car_DriveDistance(&car, CAR_DIR_FORWARD, ONE_GRID_M);
+          Step_Index--;
+          break;
+        }
+        case 5:{
+          for(int i = 0;i<Steps[Step_Index].steps;i++){
+            Car_StrafeDistance(&car, CAR_DIR_RIGHT, ONE_GRID_M, 0.20f);
+          }
+          Step_Index++;
+          HAL_UART_Transmit(&CAMERA_UART_HANDLE, (uint8_t*)&cmd, sizeof(cmd), HAL_MAX_DELAY);
+          break;
+        }
+        case 6:{
+          for(int i = 0;i<Steps[Step_Index].steps;i++){
+            Car_StrafeDistance(&car, CAR_DIR_LEFT, ONE_GRID_M, 0.20f);
+          }
+          Step_Index++;
+          HAL_UART_Transmit(&CAMERA_UART_HANDLE, (uint8_t*)&cmd, sizeof(cmd), HAL_MAX_DELAY);
           break;
         }
         default:break;
@@ -217,7 +240,7 @@ int main(void)
     /*  转圈   */
     else if(Revolve_permission == true){
       for(int i = 0;i<Camera_Data.value;i++){
-        Car_RotateAngle(&car, CAR_DIR_CCW, 370);
+        Car_RotateAngle(&car, CAR_DIR_CCW, ONE_CIRCLE);
         HAL_Delay(300);
       }
       Revolve_permission = false;//转圈完成
@@ -226,17 +249,17 @@ int main(void)
     else if(Back_permission == true){
       switch(Steps[Step_Index].direction){
         case 1:{//直行
-          Car_DriveDistance(&car, CAR_DIR_FORWARD, Steps[Step_Index].steps*0.3f);
+          Car_DriveDistance(&car, CAR_DIR_FORWARD, Steps[Step_Index].steps*ONE_GRID_M);
           break;
         }
         case 2:{//左转
-          Car_DriveDistance(&car, CAR_DIR_FORWARD,Steps[Step_Index].steps*0.3f);
-          Car_RotateAngle(&car, CAR_DIR_CW, 90);
+          Car_DriveDistance(&car, CAR_DIR_FORWARD,Steps[Step_Index].steps*ONE_GRID_M);
+          Car_RotateAngle(&car, CAR_DIR_CW, QUARTER_DEGREE);
           break;
         }
         case 3:{//右转
-          Car_DriveDistance(&car, CAR_DIR_FORWARD, Steps[Step_Index].steps*0.3f);
-          Car_RotateAngle(&car, CAR_DIR_CCW, 90);
+          Car_DriveDistance(&car, CAR_DIR_FORWARD, Steps[Step_Index].steps*ONE_GRID_M);
+          Car_RotateAngle(&car, CAR_DIR_CCW, QUARTER_DEGREE);
           break;
         }
         default:break;
@@ -311,10 +334,13 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
   if (huart == &BLUETOOTH_UART_HANDLE) {
     if (Bluetooth_Rx_Buffer[0] == 'M') {
       HAL_UART_Transmit_IT(&CAMERA_UART_HANDLE, (uint8_t*)&cmd, sizeof(cmd));
-      HAL_UART_Transmit(&BLUETOOTH_UART_HANDLE, (uint8_t*)check, sizeof(check), HAL_MAX_DELAY);
+      HAL_UART_Transmit_IT(&BLUETOOTH_UART_HANDLE, (uint8_t*)check, sizeof(check));
     } else if (Bluetooth_Rx_Buffer[0] == 'B') {
       Back_permission = true;
-      HAL_UART_Transmit(&BLUETOOTH_UART_HANDLE, (uint8_t*)check, sizeof(check), HAL_MAX_DELAY);
+      HAL_UART_Transmit_IT(&BLUETOOTH_UART_HANDLE, (uint8_t*)check, sizeof(check));
+    }else if(Bluetooth_Rx_Buffer[0] == 'S') {
+      HAL_UART_Transmit_IT(&CAMERA_UART_HANDLE, (uint8_t*)&stop, sizeof(stop));
+      HAL_UART_Transmit_IT(&BLUETOOTH_UART_HANDLE, (uint8_t*)check, sizeof(check));
     }
     HAL_UART_Receive_IT(&BLUETOOTH_UART_HANDLE, Bluetooth_Rx_Buffer, sizeof(Bluetooth_Rx_Buffer));
   }

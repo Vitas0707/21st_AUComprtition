@@ -14,7 +14,7 @@ extern "C" {
 #define FREQUENCY_MULT 4
 #define ENCODER_CPR (ENCODER_PPR * ENCODER_GEAR_RATIO * FREQUENCY_MULT)
 #define WHEEL_DIAMETER_M 0.048f
-#define TRACK_WIDTH_M 0.165f
+#define TRACK_WIDTH_M 0.20f
 
 
 /* 电机控制通道和对应编码器通道 */
@@ -48,16 +48,17 @@ extern "C" {
 
 
 #define MIN_PWM_THRESHOLD 50U
-#define MAX_PWM_THRESHOLD 65U
-#define FEED_FORWARD_PWM 50U
+#define MAX_PWM_THRESHOLD 60U
 #define DEFAULT_KP 5.0f
 #define DEFAULT_KI 3.0f
 #define DEFAULT_KD 10.0f
-#define DEFAULT_ERROR_LPF_ALPHA 0.1f
+#define DEFAULT_ERROR_LPF_ALPHA 0.3f
 #define PID_OUTPUT_LIMIT 100.0f
-#define PID_CONTROL_PERIOD_MS 10U
-#define POS_KP 1.0f
-#define POS_KD 0.1f
+#define PID_CONTROL_PERIOD_MS 1U
+#define POS_KP 5.5f
+#define POS_KD 5.5f
+#define POS_INTEGRAL_RESET_THRESHOLD 400.0f
+#define SPEED_INTEGRAL_WINDOW 0.15f
 
 typedef struct {
     TIM_HandleTypeDef* htim_pwm;
@@ -76,6 +77,7 @@ typedef struct {
     uint32_t last_tick_ms;       /* 编码器更新时间戳（ms） */
     uint32_t pid_last_tick_ms;   /* 上次 PID 控制时间戳（ms） */
     bool invert_direction;
+    float pwm_duty;
     struct {
         float kp;
         float ki;
@@ -96,6 +98,7 @@ typedef struct {
     Motor_t* rr;
     float track_width_m;
     float pos_prev_error;
+    float pos_integral;
     float lpf_alpha;
 } Car_t;
 
@@ -124,7 +127,7 @@ void Car_Init(Car_t* car, Motor_t* fl, Motor_t* fr, Motor_t* rl, Motor_t* rr, fl
 
 
 
-void Motor_StartWheel(Motor_t* m, uint16_t pwm_percent, uint8_t direction);
+void Motor_StartWheel(Motor_t* m, float pwm_percent, uint8_t direction) ;
 void Motor_StopWheel(Motor_t* m);
 void Motor_SetDirectionInverted(Motor_t* m, bool inverted);
 
@@ -134,6 +137,7 @@ void Motor_PIDSetParams(Motor_t* m, float kp, float ki, float kd);
 float Motor_PIDIncrementalUpdate(Motor_t* m, float target_speed_m_s,float dt_s);
 
 void Motor_ControlWheel(Motor_t* m, float target_speed_m_s) ;
+void Motor_ResetPIDIntegral(Motor_t* m);
 
 int Car_DriveDistance(Car_t* car, CarDir_t dir, float distance_m);
 int Car_StrafeDistance(Car_t* car, CarDir_t dir, float distance_m, float speed_m_s);
