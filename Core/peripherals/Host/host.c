@@ -4,6 +4,7 @@
 #include "stm32f4xx_hal_uart.h"
 #include "unistd.h"
 #include "usart.h"
+#include "bluetooth.h"
 #include "stm32f4xx_hal.h"
 #include <stdint.h>
 #include <stdlib.h>
@@ -16,10 +17,14 @@ SetPID_t PID_Params = {0.0f, 0.0f, 0.0f};
 RxState_t Rxstate = WaitHead;
 Command_t CurrentCMD = CMD_Kp;
 
-int _write(int file, char *ptr, int len)
-{
-    HAL_UART_Transmit(&HOST_UART_HANDLE, (uint8_t *)ptr, len, HAL_MAX_DELAY);
-    return len;
+uint8_t tail[4] = {0x00, 0x00, 0x80, 0x7f};
+
+
+
+void send_justfloat(float var1,float var2,float var3,float var4){
+    float data[4] = {var1,var2,var3,var4};
+    HAL_UART_Transmit(&BLUETOOTH_UART_HANDLE, (uint8_t*)data, 4*sizeof(float), HAL_MAX_DELAY);
+    HAL_UART_Transmit(&BLUETOOTH_UART_HANDLE, tail, 4*sizeof(float), HAL_MAX_DELAY);
 }
 
 void Host_Init() {
