@@ -20,6 +20,7 @@
 #include "main.h"
 #include "dma.h"
 #include "i2c.h"
+#include "stm32f4xx_hal.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
@@ -43,9 +44,9 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define ONE_GRID_M 0.30f
-#define QUARTER_DEGREE 125
-#define ONE_CIRCLE 500
+#define ONE_GRID_M 0.31f
+#define QUARTER_DEGREE 133.5f
+#define ONE_CIRCLE 525
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -164,113 +165,155 @@ int main(void)
     // printf("para: %.2f,%.2f,%d,%.2f,%.2f\r\n", 0.50f,RR.speed_m_s,(int)RR.invert_direction,RR.pwm_duty,RR.pid.integral);
     // Motor_PIDSetParams(&RR, PID_Params.Kp, PID_Params.Ki, PID_Params.Kd);
 
-    /*  去程  */
-    if(Move_permission == true){
-      switch(Steps[Step_Index].direction){
-        case 1:{//直行
-          Car_DriveDistance(&car, CAR_DIR_FORWARD, ONE_GRID_M);
-          for(int i = 0;i<Steps[Step_Index].steps-1;i++){
+    switch (car_state) {
+
+    /* ---- IDLE: 等待任务启动 ---- */
+    case CAR_IDLE:
+      if (Back_permission) {
+        car_state = CAR_MOVING;
+      }
+      break;
+
+    /* ---- WAITING_CAMERA: 等待摄像头回复 ---- */
+    case CAR_WAITING_CAMERA:
+      if (Move_permission) {
+        car_state = CAR_MOVING;
+      } else if (Back_permission) {
+        car_state = CAR_MOVING;
+      } else if ((HAL_GetTick() - wait_start_tick) > 5000) {
+        /* 超时：重发指令，进入恢复 */
+        car_state = CAR_RECOVERY;
+      }
+      break;
+
+    /* ---- RECOVERY: 超时恢复微移 ---- */
+    case CAR_RECOVERY:
+      Car_DriveDistance(&car, CAR_DIR_FORWARD, 0.10f);
+      HAL_Delay(500);
+      Car_DriveDistance(&car, CAR_DIR_BACKWARD, 0.10f);
+      /* 微移期间摄像头可能已回数据，检查后决定去向 */
+      if (Move_permission) {
+        Show_permission = false;
+        Revolve_permission = false;
+        car_state = CAR_MOVING;
+      } else {
+        wait_start_tick = HAL_GetTick();
+        car_state = CAR_WAITING_CAMERA;
+      }
+      break;
+
+    /* ---- MOVING: 执行移动 + 穿插 R/G 显示 ---- */
+    case CAR_MOVING:
+      if (Back_permission) {
+        /* 回退路径 */
+        switch (Steps[Step_Index].direction) {
+          case 1://直行回退
+            Car_DriveDistance(&car, CAR_DIR_FORWARD, Steps[Step_Index].steps * ONE_GRID_M);
+            break;
+          case 2://左转回退（原路右转）
+            Car_DriveDistance(&car, CAR_DIR_FORWARD, Steps[Step_Index].steps * ONE_GRID_M);
+            Car_RotateAngle(&car, CAR_DIR_CCW, QUARTER_DEGREE);
+            break;
+          case 3://右转回退（原路左转）
+            Car_DriveDistance(&car, CAR_DIR_FORWARD, Steps[Step_Index].steps * ONE_GRID_M);
+            Car_RotateAngle(&car, CAR_DIR_CW, QUARTER_DEGREE);
+            break;
+          default: break;
+        }
+        if (Step_Index == 0) {
+          Back_permission = false;
+        }
+        Step_Index--;
+        car_state = CAR_IDLE;
+      } 
+      else if (Move_permission) {
+        /* 正常前进路径：根据摄像头指令移动 */
+        switch (Steps[Step_Index].direction) {
+          case 1: { // 直行
             Car_DriveDistance(&car, CAR_DIR_FORWARD, ONE_GRID_M);
+            for (int i = 0; i < Steps[Step_Index].steps - 1; i++) {
+              Car_DriveDistance(&car, CAR_DIR_FORWARD, ONE_GRID_M);
+            }
+            Step_Index++;
+            HAL_UART_Transmit(&CAMERA_UART_HANDLE, (uint8_t*)&cmd, sizeof(cmd), HAL_MAX_DELAY);
+            break;
           }
-          Step_Index++;
-          HAL_UART_Transmit(&CAMERA_UART_HANDLE, (uint8_t*)&cmd, sizeof(cmd), HAL_MAX_DELAY);
-          break;
-        }
-        case 2:{//右转
-          Car_DriveDistance(&car, CAR_DIR_FORWARD, ONE_GRID_M);
-          Car_RotateAngle(&car, CAR_DIR_CW, QUARTER_DEGREE);
-          for(int i = 0;i<Steps[Step_Index].steps-1;i++){
+          case 2: { // 右转
             Car_DriveDistance(&car, CAR_DIR_FORWARD, ONE_GRID_M);
+            Car_RotateAngle(&car, CAR_DIR_CW, QUARTER_DEGREE);
+            for (int i = 0; i < Steps[Step_Index].steps - 1; i++) {
+              Car_DriveDistance(&car, CAR_DIR_FORWARD, ONE_GRID_M);
+            }
+            Step_Index++;
+            HAL_UART_Transmit(&CAMERA_UART_HANDLE, (uint8_t*)&cmd, sizeof(cmd), HAL_MAX_DELAY);
+            break;
           }
-          Step_Index++;
-          HAL_UART_Transmit(&CAMERA_UART_HANDLE, (uint8_t*)&cmd, sizeof(cmd), HAL_MAX_DELAY);
-          break;
-        }
-        case 3:{//左转
-          Car_DriveDistance(&car, CAR_DIR_FORWARD, ONE_GRID_M);
-          Car_RotateAngle(&car, CAR_DIR_CCW, QUARTER_DEGREE);
-          for(int i = 0;i<Steps[Step_Index].steps-1;i++){
+          case 3: { // 左转
             Car_DriveDistance(&car, CAR_DIR_FORWARD, ONE_GRID_M);
+            Car_RotateAngle(&car, CAR_DIR_CCW, QUARTER_DEGREE);
+            for (int i = 0; i < Steps[Step_Index].steps - 1; i++) {
+              Car_DriveDistance(&car, CAR_DIR_FORWARD, ONE_GRID_M);
+            }
+            Step_Index++;
+            HAL_UART_Transmit(&CAMERA_UART_HANDLE, (uint8_t*)&cmd, sizeof(cmd), HAL_MAX_DELAY);
+            break;
           }
-          Step_Index++;
-          HAL_UART_Transmit(&CAMERA_UART_HANDLE, (uint8_t*)&cmd, sizeof(cmd), HAL_MAX_DELAY);
-          break;
-        }
-        case 4:{//到达终点
-          Car_DriveDistance(&car, CAR_DIR_FORWARD, ONE_GRID_M);
-          Step_Index--;
-          break;
-        }
-        case 5:{
-          for(int i = 0;i<Steps[Step_Index].steps;i++){
-            Car_StrafeDistance(&car, CAR_DIR_RIGHT, ONE_GRID_M, 0.20f);
+          case 4:{//后退
+            Car_DriveDistance(&car, CAR_DIR_BACKWARD, Steps[Step_Index].steps * ONE_GRID_M);
+            HAL_UART_Transmit(&CAMERA_UART_HANDLE, (uint8_t*)&cmd, sizeof(cmd), HAL_MAX_DELAY);
+            Step_Index++;
+            break;
           }
-          Step_Index++;
-          HAL_UART_Transmit(&CAMERA_UART_HANDLE, (uint8_t*)&cmd, sizeof(cmd), HAL_MAX_DELAY);
-          break;
-        }
-        case 6:{
-          for(int i = 0;i<Steps[Step_Index].steps;i++){
-            Car_StrafeDistance(&car, CAR_DIR_LEFT, ONE_GRID_M, 0.20f);
+          case 5: { // 到达终点
+            Car_DriveDistance(&car, CAR_DIR_FORWARD, ONE_GRID_M);
+            Step_Index--;
+            break;
           }
-          Step_Index++;
-          HAL_UART_Transmit(&CAMERA_UART_HANDLE, (uint8_t*)&cmd, sizeof(cmd), HAL_MAX_DELAY);
-          break;
+          case 0: { // 无效方向：微移重试
+            HAL_UART_Transmit(&CAMERA_UART_HANDLE, (uint8_t*)&cmd, sizeof(cmd), HAL_MAX_DELAY);
+            Car_DriveDistance(&car, CAR_DIR_BACKWARD, 0.10f);
+            Car_DriveDistance(&car, CAR_DIR_FORWARD, 0.10f);
+            break;
+          }
+          default: break;
         }
-        default:break;
+        Move_permission = false;
+        /* 发 '1' 请求下一帧，切回等待 */
+        HAL_UART_Transmit(&CAMERA_UART_HANDLE, (uint8_t*)&cmd, sizeof(cmd), HAL_MAX_DELAY);
+        wait_start_tick = HAL_GetTick();
+        car_state = CAR_WAITING_CAMERA;
       }
-      Move_permission = false;
-    }
-    /*  显示内容   */
-    else if(Show_permission == true){
-      OLED_NewFrame();
-      if (Camera_Data.str_index == '0') {
-      OLED_PrintString(1, 1, "动物", &font16x16, OLED_COLOR_NORMAL);
-      }else if (Camera_Data.str_index == '1') {
-      OLED_PrintString(1, 1, "人类", &font16x16, OLED_COLOR_NORMAL);
-      }else if (Camera_Data.str_index == '2') {
-      OLED_PrintString(1, 1, "水果", &font16x16, OLED_COLOR_NORMAL);
-      }
-      else {
-      OLED_PrintString(1, 1, "数据有误", &font16x16, OLED_COLOR_NORMAL);
-      }
-      OLED_ShowFrame();
-      Show_permission = false;//显示完成
-    }
-    /*  转圈   */
-    else if(Revolve_permission == true){
-      for(int i = 0;i<Camera_Data.value;i++){
-        Car_RotateAngle(&car, CAR_DIR_CCW, ONE_CIRCLE);
-        HAL_Delay(300);
-      }
-      Revolve_permission = false;//转圈完成
-    }
-    /*  回退   */
-    else if(Back_permission == true){
-      switch(Steps[Step_Index].direction){
-        case 1:{//直行
-          Car_DriveDistance(&car, CAR_DIR_FORWARD, Steps[Step_Index].steps*ONE_GRID_M);
-          break;
+      case CAR_STA:
+      if (Show_permission) {
+        OLED_NewFrame();
+        if (Camera_Data.str_index == '0') {
+          OLED_PrintString(1, 1, "动物", &font16x16, OLED_COLOR_NORMAL);
+        } else if (Camera_Data.str_index == '1') {
+          OLED_PrintString(1, 1, "人类", &font16x16, OLED_COLOR_NORMAL);
+        } else if (Camera_Data.str_index == '2') {
+          OLED_PrintString(1, 1, "水果", &font16x16, OLED_COLOR_NORMAL);
+        } else {
+          OLED_PrintString(1, 1, "数据有误", &font16x16, OLED_COLOR_NORMAL);
         }
-        case 2:{//左转
-          Car_DriveDistance(&car, CAR_DIR_FORWARD,Steps[Step_Index].steps*ONE_GRID_M);
-          Car_RotateAngle(&car, CAR_DIR_CW, QUARTER_DEGREE);
-          break;
-        }
-        case 3:{//右转
-          Car_DriveDistance(&car, CAR_DIR_FORWARD, Steps[Step_Index].steps*ONE_GRID_M);
-          Car_RotateAngle(&car, CAR_DIR_CCW, QUARTER_DEGREE);
-          break;
-        }
-        default:break;
+        OLED_ShowFrame();
+        Show_permission = false;
+        car_state = CAR_IDLE;
+        break;
       }
-      if(Step_Index == 0){
-        Back_permission = false;//回退完成
+      else if (Revolve_permission) {
+        for (int i = 0; i < Camera_Data.value; i++) {
+          Car_RotateAngle(&car, CAR_DIR_CCW, ONE_CIRCLE);
+          HAL_Delay(100);
+        }
+        Revolve_permission = false;
+        car_state = CAR_IDLE;
+        break;
       }
-      Step_Index--;
+
+    default:
+      break;
     }
 
-    HAL_Delay(10);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -333,12 +376,23 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
 
   if (huart == &BLUETOOTH_UART_HANDLE) {
     if (Bluetooth_Rx_Buffer[0] == 'M') {
+      is_running = true;
+      car_state = CAR_WAITING_CAMERA;
+      wait_start_tick = HAL_GetTick();
       HAL_UART_Transmit_IT(&CAMERA_UART_HANDLE, (uint8_t*)&cmd, sizeof(cmd));
       HAL_UART_Transmit_IT(&BLUETOOTH_UART_HANDLE, (uint8_t*)check, sizeof(check));
-    } else if (Bluetooth_Rx_Buffer[0] == 'B') {
+    } 
+    else if (Bluetooth_Rx_Buffer[0] == 'D'){
+      car_state = CAR_STA;
+      HAL_UART_Transmit_IT(&CAMERA_UART_HANDLE, (uint8_t*)&cmd, sizeof(cmd));
+      HAL_UART_Transmit_IT(&BLUETOOTH_UART_HANDLE, (uint8_t*)check, sizeof(check));
+
+    }
+    else if (Bluetooth_Rx_Buffer[0] == 'B') {
       Back_permission = true;
       HAL_UART_Transmit_IT(&BLUETOOTH_UART_HANDLE, (uint8_t*)check, sizeof(check));
-    }else if(Bluetooth_Rx_Buffer[0] == 'S') {
+    }
+    else if(Bluetooth_Rx_Buffer[0] == 'S') {
       HAL_UART_Transmit_IT(&CAMERA_UART_HANDLE, (uint8_t*)&stop, sizeof(stop));
       HAL_UART_Transmit_IT(&BLUETOOTH_UART_HANDLE, (uint8_t*)check, sizeof(check));
     }

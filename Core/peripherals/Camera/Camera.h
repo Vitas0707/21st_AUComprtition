@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include "usart.h"
 
-#define CAMERA_UART_HANDLE huart2
+#define CAMERA_UART_HANDLE huart4
 #define MAX_STEPS 100
 
 typedef struct {
@@ -24,6 +24,20 @@ typedef struct {
     uint8_t steps;           // 移动距离
 } step_t;
 
+typedef  enum{
+    is_dir,
+    is_steps,
+    can_move,
+} stepbuf_t;
+
+typedef enum {
+    CAR_IDLE = 0,
+    CAR_WAITING_CAMERA,
+    CAR_MOVING,
+    CAR_RECOVERY,
+    CAR_STA
+} CarState_t;
+
 
 extern step_t Steps[MAX_STEPS];
 extern uint8_t Step_Index;
@@ -33,6 +47,10 @@ extern bool Show_permission;
 extern bool Move_permission;
 extern bool Revolve_permission;
 extern bool Back_permission;
+
+extern CarState_t car_state;
+extern bool is_running;
+extern uint32_t wait_start_tick;
 
 
 
